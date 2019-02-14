@@ -44,7 +44,7 @@
 
 /* the SCHED_ISO is supported on a few non-standard patched-in process schedulers
  */
-#if defined (__linux__) && !defined(SCHED_BATCH)
+#if defined (__linux__) && !defined(SCHED_ISO)
 # define SCHED_ISO 4
 #endif
 
