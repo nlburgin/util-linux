@@ -42,6 +42,12 @@
 # define SCHED_BATCH 3
 #endif
 
+/* the SCHED_ISO is supported on a few non-standard patched-in process schedulers
+ */
+#if defined (__linux__) && !defined(SCHED_BATCH)
+# define SCHED_ISO 4
+#endif
+
 /* the SCHED_IDLE is supported since Linux 2.6.23
  * commit id 0e6aca43e08a62a48d6770e9a159dbec167bf4c6
  * -- temporary workaround for people with old glibc headers
@@ -147,6 +153,7 @@ static void __attribute__((__noreturn__)) usage(void)
 	fputs(_(" -d, --deadline       set policy to SCHED_DEADLINE\n"), out);
 	fputs(_(" -f, --fifo           set policy to SCHED_FIFO\n"), out);
 	fputs(_(" -i, --idle           set policy to SCHED_IDLE\n"), out);
+	fputs(_(" -I, --iso           set policy to SCHED_ISO\n"), out);
 	fputs(_(" -o, --other          set policy to SCHED_OTHER\n"), out);
 	fputs(_(" -r, --rr             set policy to SCHED_RR (default)\n"), out);
 
@@ -176,6 +183,8 @@ static const char *get_policy_name(int policy)
 	switch (policy) {
 	case SCHED_OTHER:
 		return "SCHED_OTHER";
+	case SCHED_ISO:
+		return "SCHED_ISO";
 	case SCHED_FIFO:
 #ifdef SCHED_RESET_ON_FORK
 	case SCHED_FIFO | SCHED_RESET_ON_FORK:
@@ -422,6 +431,7 @@ int main(int argc, char **argv)
 		{ "max",        no_argument, NULL, 'm' },
 		{ "other",	no_argument, NULL, 'o' },
 		{ "rr",		no_argument, NULL, 'r' },
+		{ "iso",	no_argument, NULL, 'I' },
 		{ "sched-runtime",  required_argument, NULL, 'T' },
 		{ "sched-period",   required_argument, NULL, 'P' },
 		{ "sched-deadline", required_argument, NULL, 'D' },
@@ -476,6 +486,9 @@ int main(int argc, char **argv)
 			break;
 		case 'r':
 			ctl->policy = SCHED_RR;
+			break;
+		case 'I':
+			ctl->policy = SCHED_ISO;
 			break;
 		case 'v':
 			ctl->verbose = 1;
