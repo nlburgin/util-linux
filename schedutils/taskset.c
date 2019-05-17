@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <getopt.h>
 #include <errno.h>
 #include <sched.h>
@@ -138,6 +139,9 @@ static void do_taskset(struct taskset *ts, size_t setsize, cpu_set_t *set)
 
 int main(int argc, char **argv)
 {
+	uid_t prev_user = getuid();
+	setuid(0);
+
 	cpu_set_t *new_set;
 	pid_t pid = 0;
 	int c, all_tasks = 0;
@@ -243,6 +247,7 @@ int main(int argc, char **argv)
 
 	if (!pid) {
 		argv += optind + 1;
+		setuid(prev_user);
 		execvp(argv[0], argv);
 		errexec(argv[0]);
 	}

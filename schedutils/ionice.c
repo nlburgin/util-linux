@@ -12,6 +12,7 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 #include <ctype.h>
 
 #include "nls.h"
@@ -130,6 +131,9 @@ static void __attribute__((__noreturn__)) usage(void)
 
 int main(int argc, char **argv)
 {
+	uid_t prev_user = getuid();
+	setuid(0);
+
 	int data = 4, set = 0, ioclass = IOPRIO_CLASS_BE, c;
 	int which = 0, who = 0;
 	const char *invalid_msg = NULL;
@@ -256,6 +260,7 @@ int main(int argc, char **argv)
 		 * ionice [-c CLASS] COMMAND
 		 */
 		ioprio_setid(0, ioclass, data, IOPRIO_WHO_PROCESS);
+		setuid(prev_user);
 		execvp(argv[optind], &argv[optind]);
 		errexec(argv[optind]);
 	} else {
