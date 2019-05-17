@@ -1,5 +1,9 @@
-Forker's note: This fork is solely for adding support for SCHED_ISO (used by the BFS, MuQSS, and PDS kernel patches) to chrt.
-This is normally accessed using the alternate utility "schedtool", but that's been unmaintained since 2006, so... not going anywhere near that.
+Forker's note: This branch makes `chrt` setuid root, 
+for the convenience of users who aren't concerned 
+about denial-of-service threats. 
+
+It drops privileges before actually exec'ing.
+
 
 				  util-linux
 
