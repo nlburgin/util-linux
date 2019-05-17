@@ -954,7 +954,7 @@ manipulate_clock(const struct hwclock_control *ctl, const time_t set_time,
 		 const struct timeval startup_time, struct adjtime *adjtime)
 {
 	/* The time at which we read the Hardware Clock */
-	struct timeval read_time;
+	struct timeval read_time = { 0 };
 	/*
 	 * The Hardware Clock gives us a valid time, or at
 	 * least something close enough to fool mktime().
@@ -1259,7 +1259,7 @@ int main(int argc, char **argv)
 #endif
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	while ((c = getopt_long(argc, argv,
 				"hvVDd:alrsuwf:", longopts, NULL)) != -1) {
@@ -1359,9 +1359,9 @@ int main(int argc, char **argv)
 			ctl.rtc_dev_name = optarg;	/* --rtc */
 			break;
 #endif
+
 		case 'V':			/* --version */
-			out_version();
-			return 0;
+			print_version(EXIT_SUCCESS);
 		case 'h':			/* --help */
 			usage();
 		default:

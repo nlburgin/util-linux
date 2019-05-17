@@ -111,26 +111,26 @@ struct group_workspace {
 #endif
 };
 
-static gid_t get_group_gid(const char *optarg)
+static gid_t get_group_gid(const char *group)
 {
 	struct group *gr;
 	gid_t gid;
 
-	if ((gr = getgrnam(optarg)))
+	if ((gr = getgrnam(group)))
 		return gr->gr_gid;
 
-	gid = strtou32_or_err(optarg, _("invalid group argument"));
+	gid = strtou32_or_err(group, _("invalid group argument"));
 	if (!getgrgid(gid))
-		errx(EXIT_FAILURE, _("%s: unknown gid"), optarg);
+		errx(EXIT_FAILURE, _("%s: unknown gid"), group);
 
 	return gid;
 }
 
-static struct group_workspace *init_group_workspace(const char *optarg)
+static struct group_workspace *init_group_workspace(const char *group)
 {
 	struct group_workspace *buf = xmalloc(sizeof(struct group_workspace));
 
-	buf->requested_group = get_group_gid(optarg);
+	buf->requested_group = get_group_gid(group);
 	buf->ngroups = sysconf(_SC_NGROUPS_MAX) + 1;  /* room for the primary gid */
 	buf->groups = xcalloc(sizeof(*buf->groups), buf->ngroups);
 
@@ -202,7 +202,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	while ((ch = getopt_long(argc, argv, "nt:g:Vh", longopts, NULL)) != -1) {
 		switch (ch) {
@@ -220,9 +220,9 @@ int main(int argc, char **argv)
 		case 'g':
 			group_buf = init_group_workspace(optarg);
 			break;
+
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			exit(EXIT_SUCCESS);
+			print_version(EXIT_SUCCESS);
 		case 'h':
 			usage();
 		default:
@@ -359,7 +359,6 @@ static char *makemsg(char *fname, char **mvec, int mvecsz,
 		where = ttyname(STDOUT_FILENO);
 		if (!where) {
 			where = "somewhere";
-			warn(_("cannot get tty name"));
 		} else if (strncmp(where, "/dev/", 5) == 0)
 			where += 5;
 

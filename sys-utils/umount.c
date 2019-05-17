@@ -53,7 +53,7 @@ static int table_parser_errcb(struct libmnt_table *tb __attribute__((__unused__)
 }
 
 
-static void __attribute__((__noreturn__)) print_version(void)
+static void __attribute__((__noreturn__)) umount_print_version(void)
 {
 	const char *ver = NULL;
 	const char **features = NULL, **p;
@@ -479,7 +479,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	mnt_init_debug(0);
 	cxt = mnt_new_context();
@@ -517,9 +517,6 @@ int main(int argc, char **argv)
 		case 'f':
 			mnt_context_enable_force(cxt, TRUE);
 			break;
-		case 'h':
-			usage();
-			break;
 		case 'i':
 			mnt_context_disable_helpers(cxt, TRUE);
 			break;
@@ -548,9 +545,6 @@ int main(int argc, char **argv)
 		case 'v':
 			mnt_context_enable_verbose(cxt, TRUE);
 			break;
-		case 'V':
-			print_version();
-			break;
 		case 'N':
 		{
 			char path[PATH_MAX];
@@ -563,6 +557,13 @@ int main(int argc, char **argv)
 				err(MNT_EX_SYSERR, _("failed to set target namespace to %s"), pid ? path : optarg);
 			break;
 		}
+
+		case 'h':
+			mnt_free_context(cxt);
+			usage();
+		case 'V':
+			mnt_free_context(cxt);
+			umount_print_version();
 		default:
 			errtryhelp(MNT_EX_USAGE);
 		}

@@ -60,6 +60,7 @@ struct fstrim_control {
 	struct fstrim_range range;
 
 	unsigned int verbose : 1,
+		     quiet   : 1,
 		     fstab   : 1,
 		     dryrun : 1;
 };
@@ -67,14 +68,20 @@ struct fstrim_control {
 /* returns: 0 = success, 1 = unsupported, < 0 = error */
 static int fstrim_filesystem(struct fstrim_control *ctl, const char *path, const char *devname)
 {
-	int fd, rc;
+	int fd = -1, rc;
 	struct stat sb;
 	struct fstrim_range range;
+	char *rpath = realpath(path, NULL);
 
+	if (!rpath) {
+		warn(_("cannot get realpath: %s"), path);
+		rc = -errno;
+		goto done;
+	}
 	/* kernel modifies the range */
 	memcpy(&range, &ctl->range, sizeof(range));
 
-	fd = open(path, O_RDONLY);
+	fd = open(rpath, O_RDONLY);
 	if (fd < 0) {
 		warn(_("cannot open %s"), path);
 		rc = -errno;
@@ -102,9 +109,16 @@ static int fstrim_filesystem(struct fstrim_control *ctl, const char *path, const
 
 	errno = 0;
 	if (ioctl(fd, FITRIM, &range)) {
-		rc = errno == EOPNOTSUPP || errno == ENOTTY ? 1 : -errno;
-
-		if (rc != 1)
+		switch (errno) {
+		case EBADF:
+		case ENOTTY:
+		case EOPNOTSUPP:
+			rc = 1;
+			break;
+		default:
+			rc = -errno;
+		}
+		if (rc < 0)
 			warn(_("%s: FITRIM ioctl failed"), path);
 		goto done;
 	}
@@ -129,6 +143,7 @@ static int fstrim_filesystem(struct fstrim_control *ctl, const char *path, const
 done:
 	if (fd >= 0)
 		close(fd);
+	free(rpath);
 	return rc;
 }
 
@@ -303,13 +318,16 @@ static int fstrim_all(struct fstrim_control *ctl)
 		/*
 		 * We're able to detect that the device supports discard, but
 		 * things also depend on filesystem or device mapping, for
-		 * example vfat or LUKS (by default) does not support FSTRIM.
+		 * example LUKS (by default) does not support FSTRIM.
 		 *
 		 * This is reason why we ignore EOPNOTSUPP and ENOTTY errors
 		 * from discard ioctl.
 		 */
-		if (fstrim_filesystem(ctl, tgt, src) < 0)
+		rc = fstrim_filesystem(ctl, tgt, src);
+		if (rc < 0)
 		       cnt_err++;
+		else if (rc == 1 && !ctl->quiet)
+			warnx(_("%s: the discard operation is not supported"), tgt);
 	}
 
 	ul_unref_path(wholedisk);
@@ -342,6 +360,7 @@ static void __attribute__((__noreturn__)) usage(void)
 	fputs(_(" -l, --length <num>  the number of bytes to discard\n"), out);
 	fputs(_(" -m, --minimum <num> the minimum extent length to discard\n"), out);
 	fputs(_(" -v, --verbose       print number of discarded bytes\n"), out);
+	fputs(_("     --quiet         suppress error messages\n"), out);
 	fputs(_(" -n, --dry-run       does everything, but trim\n"), out);
 
 	fputs(USAGE_SEPARATOR, out);
@@ -357,6 +376,9 @@ int main(int argc, char **argv)
 	struct fstrim_control ctl = {
 			.range = { .len = ULLONG_MAX }
 	};
+	enum {
+		OPT_QUIET = CHAR_MAX + 1
+	};
 
 	static const struct option longopts[] = {
 	    { "all",       no_argument,       NULL, 'a' },
@@ -367,6 +389,7 @@ int main(int argc, char **argv)
 	    { "length",    required_argument, NULL, 'l' },
 	    { "minimum",   required_argument, NULL, 'm' },
 	    { "verbose",   no_argument,       NULL, 'v' },
+	    { "quiet",     no_argument,       NULL, OPT_QUIET },
 	    { "dry-run",   no_argument,       NULL, 'n' },
 	    { NULL, 0, NULL, 0 }
 	};
@@ -374,7 +397,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	while ((c = getopt_long(argc, argv, "Aahl:m:no:Vv", longopts, NULL)) != -1) {
 		switch(c) {
@@ -387,12 +410,6 @@ int main(int argc, char **argv)
 		case 'n':
 			ctl.dryrun = 1;
 			break;
-		case 'h':
-			usage();
-			break;
-		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
 		case 'l':
 			ctl.range.len = strtosize_or_err(optarg,
 					_("failed to parse length"));
@@ -408,9 +425,15 @@ int main(int argc, char **argv)
 		case 'v':
 			ctl.verbose = 1;
 			break;
+		case OPT_QUIET:
+			ctl.quiet = 1;
+			break;
+		case 'h':
+			usage();
+		case 'V':
+			print_version(EXIT_SUCCESS);
 		default:
 			errtryhelp(EXIT_FAILURE);
-			break;
 		}
 	}
 
@@ -429,7 +452,7 @@ int main(int argc, char **argv)
 		return fstrim_all(&ctl);	/* MNT_EX_* codes */
 
 	rc = fstrim_filesystem(&ctl, path, NULL);
-	if (rc == 1)
+	if (rc == 1 && !ctl.quiet)
 		warnx(_("%s: the discard operation is not supported"), path);
 
 	return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;

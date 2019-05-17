@@ -74,7 +74,7 @@ static int lslogins_flag;
 
 #define UL_UID_MIN 1000
 #define UL_UID_MAX 60000
-#define UL_SYS_UID_MIN 201
+#define UL_SYS_UID_MIN 101
 #define UL_SYS_UID_MAX 999
 
 /* we use the value of outmode to determine
@@ -1425,7 +1425,7 @@ int main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	ctl->time_mode = TIME_SHORT;
 
@@ -1528,8 +1528,7 @@ int main(int argc, char *argv[])
 			ctl->time_mode = parse_time_mode(optarg);
 			break;
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'Z':
 		{
 #ifdef HAVE_LIBSELINUX
@@ -1568,7 +1567,7 @@ int main(int argc, char *argv[])
 			 columns[ncolumns++] = i;
 
 	} else if (ncolumns == 2) {
-		/* default colummns */
+		/* default columns */
 		add_column(columns, ncolumns++, COL_NPROCS);
 		add_column(columns, ncolumns++, COL_PWDLOCK);
 		add_column(columns, ncolumns++, COL_PWDDENY);

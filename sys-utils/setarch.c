@@ -194,6 +194,19 @@ static struct arch_domain *init_arch_domains(void)
 		{PER_LINUX,	"alphaev6",	"alpha"},
 		{PER_LINUX,	"alphaev67",	"alpha"},
 #endif
+#if defined(__e2k__)
+		{PER_LINUX,	"e2k",      "e2k"},
+		{PER_LINUX,	"e2kv4",	"e2k"},
+		{PER_LINUX,	"e2kv5",	"e2k"},
+		{PER_LINUX,	"e2kv6",	"e2k"},
+		{PER_LINUX,	"e2k4c",	"e2k"},
+		{PER_LINUX,	"e2k8c",	"e2k"},
+		{PER_LINUX,	"e2k1cp",	"e2k"},
+		{PER_LINUX,	"e2k8c2",	"e2k"},
+		{PER_LINUX,	"e2k12c",	"e2k"},
+		{PER_LINUX,	"e2k16c",	"e2k"},
+		{PER_LINUX,	"e2k2c3",	"e2k"},
+#endif
 		/* place holder, will be filled up at runtime */
 		{-1,		NULL,		NULL},
 		{-1,		NULL,		NULL}
@@ -266,7 +279,7 @@ int main(int argc, char *argv[])
 	int verbose = 0;
 	int archwrapper;
 	int c;
-	struct arch_domain *doms, *target;
+	struct arch_domain *doms, *target = NULL;
 	unsigned long pers_value = 0;
 	char *shell = NULL, *shell_arg = NULL;
 
@@ -302,7 +315,7 @@ int main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	if (argc < 1) {
 		warnx(_("Not enough arguments"));
@@ -330,12 +343,6 @@ int main(int argc, char *argv[])
 
 	while ((c = getopt_long(argc, argv, "+hVv3BFILRSTXZ", longopts, NULL)) != -1) {
 		switch (c) {
-		case 'h':
-			usage(archwrapper);
-			break;
-		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
 		case 'v':
 			verbose = 1;
 			break;
@@ -381,8 +388,13 @@ int main(int argc, char *argv[])
 			} else
 				warnx(_("unrecognized option '--list'"));
 			/* fallthrough */
+
 		default:
 			errtryhelp(EXIT_FAILURE);
+		case 'h':
+			usage(archwrapper);
+		case 'V':
+			print_version(EXIT_SUCCESS);
 		}
 	}
 

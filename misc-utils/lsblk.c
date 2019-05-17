@@ -49,6 +49,7 @@
 #include "sysfs.h"
 #include "closestream.h"
 #include "optutils.h"
+#include "fileutils.h"
 
 #include "lsblk.h"
 
@@ -146,7 +147,7 @@ struct colinfo {
 
 /* columns descriptions */
 static struct colinfo infos[] = {
-	[COL_NAME]   = { "NAME",    0.25, SCOLS_FL_TREE | SCOLS_FL_NOEXTREMES, N_("device name") },
+	[COL_NAME]   = { "NAME",    0.25, SCOLS_FL_NOEXTREMES, N_("device name") },
 	[COL_KNAME]  = { "KNAME",   0.3, 0, N_("internal kernel device name") },
 	[COL_PKNAME] = { "PKNAME",  0.3, 0, N_("internal parent kernel device name") },
 	[COL_PATH]   = { "PATH",    0.3,  0, N_("path to the device node") },
@@ -326,24 +327,6 @@ static int column_id_to_number(int id)
 static int is_dm(const char *name)
 {
 	return strncmp(name, "dm-", 3) ? 0 : 1;
-}
-
-/* This is readdir()-like function, but skips "." and ".." directory entries */
-static struct dirent *xreaddir(DIR *dp)
-{
-	struct dirent *d;
-
-	assert(dp);
-
-	while ((d = readdir(dp))) {
-		if (!strcmp(d->d_name, ".") ||
-		    !strcmp(d->d_name, ".."))
-			continue;
-
-		/* blacklist here? */
-		break;
-	}
-	return d;
 }
 
 /* Returns full pat to the device node (TODO: what about sysfs_blkdev_get_path()) */
@@ -1030,7 +1013,9 @@ static void device_to_scols(
 	struct lsblk_device *child = NULL;
 	int link_group = 0;
 
-	ON_DBG(DEV, if (ul_path_isopen_dirfd(dev->sysfs)) ul_debugobj(dev, "%s ---> is open!", dev->name));
+
+	DBG(DEV, ul_debugobj(dev, "add '%s' to scols", dev->name));
+	ON_DBG(DEV, if (ul_path_isopen_dirfd(dev->sysfs)) ul_debugobj(dev, " %s ---> is open!", dev->name));
 
 	/* Do not print device more than one in --list mode */
 	if (!(lsblk->flags & LSBLK_TREE) && dev->is_printed)
@@ -1053,14 +1038,19 @@ static void device_to_scols(
 		struct libscols_line *gr = parent_line;
 
 		/* Merge all my parents to the one group */
+		DBG(DEV, ul_debugobj(dev, " grouping parents [--merge]"));
 		lsblk_reset_iter(&itr, LSBLK_ITER_FORWARD);
 		while (lsblk_device_next_parent(dev, &itr, &p) == 0) {
-			if (!p->scols_line)
+			if (!p->scols_line) {
+				DBG(DEV, ul_debugobj(dev, " *** ignore '%s' no scols line yet", p->name));
 				continue;
-			scols_table_group_lines(tab, gr, p->scols_line, 0);
+			}
+			DBG(DEV, ul_debugobj(dev, " group '%s'", p->name));
+			scols_table_group_lines(tab, p->scols_line, gr, 0);
 		}
 
 		/* Link the group -- this makes group->child connection */
+		DBG(DEV, ul_debugobj(dev, " linking the group [--merge]"));
 		scols_line_link_group(ln, gr, 0);
 	}
 
@@ -1078,6 +1068,7 @@ static void device_to_scols(
 			if (data && sortdata != (uint64_t) -1)
 				set_sortdata_u64(ln, i, sortdata);
 		}
+		DBG(DEV, ul_debugobj(dev, " refer data[%zu]=\"%s\"", i, data));
 		if (data && scols_line_refer_data(ln, i, data))
 			err(EXIT_FAILURE, _("failed to add output data"));
 	}
@@ -1089,10 +1080,12 @@ static void device_to_scols(
 		 * otherwise we can close */
 		ul_path_close_dirfd(dev->sysfs);
 
-
 	lsblk_reset_iter(&itr, LSBLK_ITER_FORWARD);
-	while (lsblk_device_next_child(dev, &itr, &child) == 0)
+	while (lsblk_device_next_child(dev, &itr, &child) == 0) {
+		DBG(DEV, ul_debugobj(dev, "%s -> continue to child", dev->name));
 		device_to_scols(child, dev, tab, ln);
+		DBG(DEV, ul_debugobj(dev, "%s <- child done", dev->name));
+	}
 
 	/* Let's be careful with number of open files */
 	ul_path_close_dirfd(dev->sysfs);
@@ -1567,6 +1560,7 @@ static int process_all_devices(struct lsblk_devtree *tr)
 		if (is_maj_excluded(dev->maj) || !is_maj_included(dev->maj)) {
 			DBG(DEV, ul_debug(" %s: ignore (by filter)", d->d_name));
 			lsblk_devtree_remove_device(tr, dev);
+			dev = NULL;
 			goto next;
 		}
 
@@ -1725,7 +1719,7 @@ static void __attribute__((__noreturn__)) usage(void)
 	fputs(_(" -O, --output-all     output all columns\n"), out);
 	fputs(_(" -P, --pairs          use key=\"value\" output format\n"), out);
 	fputs(_(" -S, --scsi           output info about SCSI devices\n"), out);
-	fputs(_(" -T, --tree           use tree format output\n"), out);
+	fputs(_(" -T, --tree[=<column>] use tree format output\n"), out);
 	fputs(_(" -a, --all            print all devices\n"), out);
 	fputs(_(" -b, --bytes          print SIZE in bytes rather than in human readable format\n"), out);
 	fputs(_(" -d, --nodeps         don't print slaves or holders\n"), out);
@@ -1769,13 +1763,14 @@ int main(int argc, char *argv[])
 	struct lsblk _ls = {
 		.sort_id = -1,
 		.dedup_id = -1,
-		.flags = LSBLK_TREE
+		.flags = LSBLK_TREE,
+		.tree_id = COL_NAME
 	};
 	struct lsblk_devtree *tr = NULL;
 	int c, status = EXIT_FAILURE;
 	char *outarg = NULL;
 	size_t i;
-	int force_tree = 0;
+	int force_tree = 0, has_tree_col = 0;
 
 	enum {
 		OPT_SYSROOT = CHAR_MAX + 1
@@ -1808,7 +1803,7 @@ int main(int argc, char *argv[])
 		{ "scsi",       no_argument,       NULL, 'S' },
 		{ "sort",	required_argument, NULL, 'x' },
 		{ "sysroot",    required_argument, NULL, OPT_SYSROOT },
-		{ "tree",       no_argument,       NULL, 'T' },
+		{ "tree",       optional_argument, NULL, 'T' },
 		{ "version",    no_argument,       NULL, 'V' },
 		{ NULL, 0, NULL, 0 },
 	};
@@ -1820,6 +1815,7 @@ int main(int argc, char *argv[])
 		{ 'O','S' },
 		{ 'O','f' },
 		{ 'O','m' },
+		{ 'O','o' },
 		{ 'O','t' },
 		{ 'P','T', 'l','r' },
 		{ 0 }
@@ -1829,14 +1825,14 @@ int main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	lsblk = &_ls;
 
 	lsblk_init_debug();
 
 	while((c = getopt_long(argc, argv,
-			       "abdDzE:e:fhJlnMmo:OpPiI:rstVSTx:", longopts, NULL)) != -1) {
+			       "abdDzE:e:fhJlnMmo:OpPiI:rstVST:x:", longopts, NULL)) != -1) {
 
 		err_exclusive_options(c, longopts, excl, excl_st);
 
@@ -1863,9 +1859,6 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			parse_excludes(optarg);
-			break;
-		case 'h':
-			usage();
 			break;
 		case 'J':
 			lsblk->flags |= LSBLK_JSON;
@@ -1948,14 +1941,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'T':
 			force_tree = 1;
+			if (optarg)
+				lsblk->tree_id = column_name_to_id(optarg, strlen(optarg));
 			break;
-
 		case OPT_SYSROOT:
 			lsblk->sysroot = optarg;
 			break;
-		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
 		case 'E':
 			lsblk->dedup_id = column_name_to_id(optarg, strlen(optarg));
 			if (lsblk->dedup_id >= 0)
@@ -1967,7 +1958,13 @@ int main(int argc, char *argv[])
 			lsblk->sort_id = column_name_to_id(optarg, strlen(optarg));
 			if (lsblk->sort_id >= 0)
 				break;
-			/* fallthrough */
+			errtryhelp(EXIT_FAILURE);
+			break;
+
+		case 'h':
+			usage();
+		case 'V':
+			print_version(EXIT_SUCCESS);
 		default:
 			errtryhelp(EXIT_FAILURE);
 		}
@@ -2039,12 +2036,27 @@ int main(int argc, char *argv[])
 		struct libscols_column *cl;
 		int id = get_column_id(i), fl = ci->flags;
 
-		if (!(lsblk->flags & LSBLK_TREE) && id == COL_NAME)
-			fl &= ~SCOLS_FL_TREE;
+		if ((lsblk->flags & LSBLK_TREE)
+		    && has_tree_col == 0
+		    && id == lsblk->tree_id) {
+			fl |= SCOLS_FL_TREE;
+			fl &= ~SCOLS_FL_RIGHT;
+			has_tree_col = 1;
+		}
+
 		if (lsblk->sort_hidden && lsblk->sort_id == id)
 			fl |= SCOLS_FL_HIDDEN;
 		if (lsblk->dedup_hidden && lsblk->dedup_id == id)
 			fl |= SCOLS_FL_HIDDEN;
+
+		if (force_tree
+		    && lsblk->flags & LSBLK_JSON
+		    && has_tree_col == 0
+		    && i + 1 == ncolumns)
+			/* The "--tree --json" specified, but no column with
+			 * SCOLS_FL_TREE yet; force it for the last column
+			 */
+			fl |= SCOLS_FL_TREE;
 
 		cl = scols_table_new_column(lsblk->table, ci->name, ci->whint, fl);
 		if (!cl) {

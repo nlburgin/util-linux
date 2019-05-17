@@ -225,6 +225,9 @@ int fdisk_table_add_partition(struct fdisk_table *tb, struct fdisk_partition *pa
 	if (!tb || !pa)
 		return -EINVAL;
 
+	if (!list_empty(&pa->parts))
+		return -EBUSY;
+
 	fdisk_ref_partition(pa);
 	list_add_tail(&pa->parts, &tb->parts);
 	tb->nents++;
@@ -575,7 +578,7 @@ done:
  *
  * Note that free space smaller than grain (see fdisk_get_grain_size()) is
  * ignored.
-
+ *
  * Returns: 0 on success, otherwise, a corresponding error.
  */
 int fdisk_get_freespaces(struct fdisk_context *cxt, struct fdisk_table **tb)
@@ -632,7 +635,12 @@ int fdisk_get_freespaces(struct fdisk_context *cxt, struct fdisk_table **tb)
 		/* add gaps between logical partitions */
 		if (fdisk_partition_is_container(pa))
 			rc = check_container_freespace(cxt, parts, *tb, pa);
-		last = fdisk_partition_get_end(pa);
+
+		if (fdisk_partition_has_end(pa)) {
+			fdisk_sector_t pa_end = fdisk_partition_get_end(pa);
+			if (pa_end > last)
+				last = fdisk_partition_get_end(pa);
+		}
 		nparts++;
 	}
 
@@ -720,7 +728,7 @@ int fdisk_diff_tables(struct fdisk_table *a, struct fdisk_table *b,
 		      struct fdisk_iter *itr,
 		      struct fdisk_partition **res, int *change)
 {
-	struct fdisk_partition *pa, *pb;
+	struct fdisk_partition *pa = NULL, *pb;
 	int rc = 1;
 
 	assert(itr);

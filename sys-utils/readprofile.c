@@ -136,7 +136,7 @@ int main(int argc, char **argv)
 	unsigned long long add0 = 0;
 	unsigned int step;
 	unsigned int *buf, total, fn_len;
-	unsigned long long fn_add, next_add;	/* current and next address */
+	unsigned long long fn_add = 0, next_add; /* current and next address */
 	char fn_name[S_LEN], next_name[S_LEN];	/* current and next name */
 	char mode[8];
 	int c;
@@ -169,7 +169,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	proFile = defaultpro;
 	mapFile = defaultmap;
@@ -206,9 +206,9 @@ int main(int argc, char **argv)
 		case 'v':
 			optVerbose++;
 			break;
+
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'h':
 			usage();
 		default:

@@ -133,7 +133,9 @@ static int get_user_reply(const char *prompt, char *buf, size_t bufsz)
 		p = readline(prompt);
 		if (!p)
 			return 1;
-		memcpy(buf, p, bufsz);
+		strncpy(buf, p, bufsz - 1);
+		if (bufsz != 0)
+			buf[bufsz - 1] = '\0';
 		free(p);
 	} else
 #endif
@@ -190,7 +192,7 @@ static int ask_callback(struct fdisk_context *cxt __attribute__((__unused__)),
 		break;
 	case FDISK_ASKTYPE_YESNO:
 	{
-		char buf[BUFSIZ];
+		char buf[BUFSIZ] = { '\0' };
 		fputc('\n', stdout);
 		do {
 			int x;
@@ -1722,7 +1724,7 @@ static int command_fdisk(struct sfdisk *sf, int argc, char **argv)
 
 		nparts = fdisk_table_get_nents(tb);
 		if (nparts) {
-			size_t cur_partno;
+			size_t cur_partno = (size_t) -1;
 			struct fdisk_partition *pa = fdisk_table_get_partition(tb, nparts - 1);
 
 			assert(pa);
@@ -1992,7 +1994,7 @@ int main(int argc, char *argv[])
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	while ((c = getopt_long(argc, argv, "aAbcdfFgGhJlLo:O:nN:qrsTu:vVX:Y:w:W:",
 					longopts, &longidx)) != -1) {
@@ -2077,9 +2079,7 @@ int main(int argc, char *argv[])
 				errx(EXIT_FAILURE, _("unsupported unit '%c'"), *optarg);
 			break;
 		case 'v':
-			printf(_("%s from %s\n"), program_invocation_short_name,
-						  PACKAGE_STRING);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'V':
 			sf->verify = 1;
 			break;

@@ -600,7 +600,7 @@ static int is_phantom(const struct last_control *ctl, struct utmpx *ut)
 
 	if (ut->ut_tv.tv_sec < ctl->boot_time.tv_sec)
 		return 1;
-	ut->ut_user[__UT_NAMESIZE - 1] = '\0';
+	ut->ut_user[sizeof(ut->ut_user) - 1] = '\0';
 	pw = getpwnam(ut->ut_user);
 	if (!pw)
 		return 1;
@@ -939,7 +939,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 	/*
 	 * Which file do we want to read?
 	 */
@@ -954,8 +954,7 @@ int main(int argc, char **argv)
 			usage(&ctl);
 			break;
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'R':
 			ctl.showhost = 0;
 			break;

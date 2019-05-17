@@ -439,6 +439,7 @@ extern int mnt_fs_set_userdata(struct libmnt_fs *fs, void *data);
 extern const char *mnt_fs_get_source(struct libmnt_fs *fs);
 extern int mnt_fs_set_source(struct libmnt_fs *fs, const char *source);
 extern const char *mnt_fs_get_srcpath(struct libmnt_fs *fs);
+extern int mnt_fs_get_table(struct libmnt_fs *fs, struct libmnt_table **tb);
 
 extern int mnt_fs_get_tag(struct libmnt_fs *fs, const char **name,
 			  const char **value);
@@ -560,6 +561,11 @@ extern int mnt_table_append_trailing_comment(struct libmnt_table *tb, const char
 extern int mnt_table_set_cache(struct libmnt_table *tb, struct libmnt_cache *mpc);
 extern struct libmnt_cache *mnt_table_get_cache(struct libmnt_table *tb);
 extern int mnt_table_add_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
+extern int mnt_table_find_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
+extern int mnt_table_insert_fs(struct libmnt_table *tb, int before,
+				struct libmnt_fs *pos, struct libmnt_fs *fs);
+extern int mnt_table_move_fs(struct libmnt_table *src, struct libmnt_table *dst,
+                      int before, struct libmnt_fs *pos, struct libmnt_fs *fs);
 extern int mnt_table_remove_fs(struct libmnt_table *tb, struct libmnt_fs *fs);
 extern int mnt_table_first_fs(struct libmnt_table *tb, struct libmnt_fs **fs);
 extern int mnt_table_last_fs(struct libmnt_table *tb, struct libmnt_fs **fs);

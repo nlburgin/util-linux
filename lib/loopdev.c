@@ -128,7 +128,7 @@ int loopcxt_set_device(struct loopdev_cxt *lc, const char *device)
 	return 0;
 }
 
-int loopcxt_has_device(struct loopdev_cxt *lc)
+inline int loopcxt_has_device(struct loopdev_cxt *lc)
 {
 	return lc && *lc->device;
 }
@@ -363,7 +363,7 @@ int loopcxt_deinit_iterator(struct loopdev_cxt *lc)
 
 /*
  * Same as loopcxt_set_device, but also checks if the device is
- * associeted with any file.
+ * associated with any file.
  *
  * Returns: <0 on error, 0 on success, 1 device does not match with
  *         LOOPITER_FL_{USED,FREE} flags.
@@ -692,7 +692,7 @@ char *loopcxt_get_backing_file(struct loopdev_cxt *lc)
 
 	if (sysfs)
 		/*
-		 * This is always preffered, the loop_info64
+		 * This is always preferred, the loop_info64
 		 * has too small buffer for the filename.
 		 */
 		ul_path_read_string(sysfs, &res, "loop/backing_file");
@@ -1034,8 +1034,8 @@ int loopcxt_is_used(struct loopdev_cxt *lc,
 		    uint64_t sizelimit,
 		    int flags)
 {
-	ino_t ino;
-	dev_t dev;
+	ino_t ino = 0;
+	dev_t dev = 0;
 
 	if (!lc)
 		return 0;
@@ -1067,12 +1067,12 @@ int loopcxt_is_used(struct loopdev_cxt *lc,
 	return 0;
 found:
 	if (flags & LOOPDEV_FL_OFFSET) {
-		uint64_t off;
+		uint64_t off = 0;
 
 		int rc = loopcxt_get_offset(lc, &off) == 0 && off == offset;
 
 		if (rc && flags & LOOPDEV_FL_SIZELIMIT) {
-			uint64_t sz;
+			uint64_t sz = 0;
 
 			return loopcxt_get_sizelimit(lc, &sz) == 0 && sz == sizelimit;
 		} else
@@ -1275,7 +1275,7 @@ static int loopcxt_check_size(struct loopdev_cxt *lc, int file_fd)
  */
 int loopcxt_setup_device(struct loopdev_cxt *lc)
 {
-	int file_fd, dev_fd, mode = O_RDWR, rc = -1, cnt = 0;
+	int file_fd, dev_fd, mode = O_RDWR, rc = -1, cnt = 0, err, again;
 	int errsv = 0;
 
 	if (!lc || !*lc->device || !lc->filename)
@@ -1354,7 +1354,13 @@ int loopcxt_setup_device(struct loopdev_cxt *lc)
 		goto err;
 	}
 
-	if (ioctl(dev_fd, LOOP_SET_STATUS64, &lc->info)) {
+	do {
+		err = ioctl(dev_fd, LOOP_SET_STATUS64, &lc->info);
+		again = err && errno == EAGAIN;
+		if (again)
+			xusleep(250000);
+	} while (again);
+	if (err) {
 		rc = -errno;
 		errsv = errno;
 		DBG(SETUP, ul_debugobj(lc, "LOOP_SET_STATUS64 failed: %m"));
@@ -1399,7 +1405,7 @@ err:
  */
 int loopcxt_ioctl_status(struct loopdev_cxt *lc)
 {
-	int dev_fd, rc = -1;
+	int dev_fd, rc = -1, err, again;
 
 	errno = 0;
 	dev_fd = loopcxt_get_fd(lc);
@@ -1410,7 +1416,13 @@ int loopcxt_ioctl_status(struct loopdev_cxt *lc)
 	}
 	DBG(SETUP, ul_debugobj(lc, "device open: OK"));
 
-	if (ioctl(dev_fd, LOOP_SET_STATUS64, &lc->info)) {
+	do {
+		err = ioctl(dev_fd, LOOP_SET_STATUS64, &lc->info);
+		again = err && errno == EAGAIN;
+		if (again)
+			xusleep(250000);
+	} while (again);
+	if (err) {
 		rc = -errno;
 		DBG(SETUP, ul_debugobj(lc, "LOOP_SET_STATUS64 failed: %m"));
 		return rc;
@@ -1776,7 +1788,7 @@ char *loopdev_find_by_backing_file(const char *filename, uint64_t offset, uint64
 
 /*
  * Returns number of loop devices associated with @file, if only one loop
- * device is associeted with the given @filename and @loopdev is not NULL then
+ * device is associated with the given @filename and @loopdev is not NULL then
  * @loopdev returns name of the device.
  */
 int loopdev_count_by_backing_file(const char *filename, char **loopdev)

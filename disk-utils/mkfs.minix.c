@@ -685,7 +685,7 @@ static int find_super_magic(const struct fs_control *ctl)
 
 static void determine_device_blocks(struct fs_control *ctl, const struct stat *statbuf)
 {
-	unsigned long long dev_blocks;
+	unsigned long long dev_blocks = 0;
 
 	if (S_ISBLK(statbuf->st_mode)) {
 		int sectorsize;
@@ -758,7 +758,7 @@ int main(int argc, char ** argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	strutils_set_exitcode(MKFS_EX_USAGE);
 
@@ -792,8 +792,7 @@ int main(int argc, char ** argv)
 			listfile = optarg;
 			break;
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return MKFS_EX_OK;
+			print_version(MKFS_EX_OK);
 		case 'h':
 			usage();
 		default:

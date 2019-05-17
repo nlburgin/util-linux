@@ -77,6 +77,7 @@ static void groups_fix_members_order(struct libscols_line *ln)
 	struct libscols_line *child;
 
 	if (ln->group) {
+		INIT_LIST_HEAD(&ln->ln_groups);
 		list_add_tail(&ln->ln_groups, &ln->group->gr_members);
 		DBG(GROUP, ul_debugobj(ln->group, "fixing member line=%p [%zu/%zu]",
 					ln, ln->group->nmembers,
@@ -126,7 +127,7 @@ void scols_groups_fix_members_order(struct libscols_table *tb)
 		groups_fix_members_order(ln);
 	}
 
-	/* If group child is memeber of another group *
+	/* If group child is member of another group *
 	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
 	while (scols_table_next_group(tb, &itr, &gr) == 0) {
 		struct libscols_iter xitr;
@@ -157,7 +158,7 @@ static inline const char *group_state_to_string(int state)
 
 	return grpstates[state];
 }
-
+/*
 static void grpset_debug(struct libscols_table *tb, struct libscols_line *ln)
 {
 	size_t i;
@@ -178,6 +179,7 @@ static void grpset_debug(struct libscols_table *tb, struct libscols_line *ln)
 			DBG(LINE, ul_debug("grpset[%zu]: free", i));
 	}
 }
+*/
 static int group_state_for_line(struct libscols_group *gr, struct libscols_line *ln)
 {
 	if (gr->state == SCOLS_GSTATE_NONE &&
@@ -219,29 +221,35 @@ static int group_state_for_line(struct libscols_group *gr, struct libscols_line 
 	return SCOLS_GSTATE_NONE;
 }
 
-/* For now we assume that each active group is just 3 columns width. Later we can make it dynamic... 
+/*
+ * apply new @state to the chunk (addresesd by @xx) of grpset used for the group (@gr)
  */
 static void grpset_apply_group_state(struct libscols_group **xx, int state, struct libscols_group *gr)
 {
-	DBG(GROUP, ul_debugobj(gr, "   appling state to grpset"));
+	size_t i;
+
+	DBG(GROUP, ul_debugobj(gr, "   applying state to grpset"));
 
 	/* gr->state holds the old state, @state is the new state
 	 */
-	if (state == SCOLS_GSTATE_NONE)
-		xx[0] = xx[1] = xx[2] = NULL;
-	else
-		xx[0] = xx[1] = xx[2] = gr;
+	for (i = 0; i < SCOLS_GRPSET_CHUNKSIZ; i++)
+		xx[i] = state == SCOLS_GSTATE_NONE ? NULL : gr;
+
 	gr->state = state;
 }
 
-static struct libscols_group **grpset_locate_freespace(struct libscols_table *tb, size_t wanted, int prepend)
+static struct libscols_group **grpset_locate_freespace(struct libscols_table *tb, int chunks, int prepend)
 {
 	size_t i, avail = 0;
 	struct libscols_group **tmp, **first = NULL;
+	const size_t wanted = chunks * SCOLS_GRPSET_CHUNKSIZ;
 
 	if (!tb->grpset_size)
 		prepend = 0;
-
+	/*
+	DBG(TAB, ul_debugobj(tb, "orig grpset:"));
+	grpset_debug(tb, NULL);
+	*/
 	if (prepend) {
 		for (i = tb->grpset_size - 1; ; i--) {
 			if (tb->grpset[i] == NULL) {
@@ -267,8 +275,8 @@ static struct libscols_group **grpset_locate_freespace(struct libscols_table *tb
 		}
 	}
 
-	DBG(TAB, ul_debugobj(tb, "   realocate grpset [sz: old=%zu, new=%zu]",
-				tb->grpset_size, tb->grpset_size + wanted));
+	DBG(TAB, ul_debugobj(tb, "   realocate grpset [sz: old=%zu, new=%zu, new_chunks=%d]",
+				tb->grpset_size, tb->grpset_size + wanted, chunks));
 
 	tmp = realloc(tb->grpset, (tb->grpset_size + wanted) * sizeof(struct libscols_group *));
 	if (!tmp)
@@ -291,8 +299,11 @@ static struct libscols_group **grpset_locate_freespace(struct libscols_table *tb
 	memset(first, 0, wanted * sizeof(struct libscols_group *));
 	tb->grpset_size += wanted;
 
-	grpset_debug(tb, NULL);
 done:
+	/*
+	DBG(TAB, ul_debugobj(tb, "new grpset:"));
+	grpset_debug(tb, NULL);
+	*/
 	return first;
 }
 
@@ -309,28 +320,25 @@ static struct libscols_group **grpset_locate_group(struct libscols_table *tb, st
 }
 
 
-
-#define SCOLS_GRPSET_MINSZ	3
-
 static int grpset_update(struct libscols_table *tb, struct libscols_line *ln, struct libscols_group *gr)
 {
 	struct libscols_group **xx;
 	int state;
 
-	DBG(LINE, ul_debugobj(ln, "   group [%p] grpset update", gr));
+	DBG(LINE, ul_debugobj(ln, "   group [%p] grpset update [grpset size=%zu]", gr, tb->grpset_size));
 
 	/* new state, note that gr->state still holds the original state */
 	state = group_state_for_line(gr, ln);
-	DBG(LINE, ul_debugobj(ln, "    state old='%s', new='%s'",
+	DBG(LINE, ul_debugobj(ln, "    state %s --> %s",
 			group_state_to_string(gr->state),
 			group_state_to_string(state)));
 
 	if (state == SCOLS_GSTATE_FIRST_MEMBER && gr->state != SCOLS_GSTATE_NONE) {
-		DBG(LINE, ul_debugobj(ln, "wrong group initialization"));
+		DBG(LINE, ul_debugobj(ln, "wrong group initialization (%s)", group_state_to_string(gr->state)));
 		abort();
 	}
 	if (state != SCOLS_GSTATE_NONE && gr->state == SCOLS_GSTATE_LAST_CHILD) {
-		DBG(LINE, ul_debugobj(ln, "wrong group termination"));
+		DBG(LINE, ul_debugobj(ln, "wrong group termination (%s)", group_state_to_string(gr->state)));
 		abort();
 	}
 	if (gr->state == SCOLS_GSTATE_LAST_MEMBER &&
@@ -348,7 +356,7 @@ static int grpset_update(struct libscols_table *tb, struct libscols_line *ln, st
 
 	/* locate place in grpset where we draw the group */
 	if (!tb->grpset || gr->state == SCOLS_GSTATE_NONE)
-		xx = grpset_locate_freespace(tb, SCOLS_GRPSET_MINSZ, 1);
+		xx = grpset_locate_freespace(tb, 1, 1);
 	else
 		xx = grpset_locate_group(tb, gr);
 	if (!xx) {
@@ -357,7 +365,7 @@ static int grpset_update(struct libscols_table *tb, struct libscols_line *ln, st
 	}
 
 	grpset_apply_group_state(xx, state, gr);
-	ON_DBG(LINE, grpset_debug(tb, ln));
+	/*ON_DBG(LINE, grpset_debug(tb, ln));*/
 	return 0;
 }
 
@@ -399,66 +407,6 @@ int scols_groups_update_grpset(struct libscols_table *tb, struct libscols_line *
 	return rc;
 }
 
-static int groups_calculate_grpset(struct libscols_table *tb, struct libscols_line *ln)
-{
-	struct libscols_iter itr;
-	struct libscols_line *child;
-	int rc = 0;
-
-	DBG(LINE, ul_debugobj(ln, " grpset calculate"));
-
-	/* current line */
-	rc = scols_groups_update_grpset(tb, ln);
-	if (rc)
-		goto done;
-
-	/* line's children */
-	if (has_children(ln)) {
-		scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
-		while (scols_line_next_child(ln, &itr, &child) == 0) {
-			rc = groups_calculate_grpset(tb, child);
-			if (rc)
-				goto done;
-		}
-	}
-
-	/* group's children */
-	if (is_last_group_member(ln) && has_group_children(ln)) {
-		scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
-		while (scols_line_next_group_child(ln, &itr, &child) == 0) {
-			rc = groups_calculate_grpset(tb, child);
-			if (rc)
-				goto done;
-		}
-	}
-done:
-	return rc;
-}
-
-
-int scols_groups_calculate_grpset(struct libscols_table *tb)
-{
-	struct libscols_iter itr;
-	struct libscols_line *ln;
-	int rc = 0;
-
-	DBG(TAB, ul_debugobj(tb, "grpset calculate [top-level]"));
-
-	scols_groups_reset_state(tb);
-
-	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
-	while (scols_table_next_line(tb, &itr, &ln) == 0) {
-		if (ln->parent || ln->parent_group)
-			continue;
-		rc = groups_calculate_grpset(tb, ln);
-		if (rc)
-			break;
-	}
-
-	scols_groups_reset_state(tb);
-	return rc;
-}
-
 void scols_groups_reset_state(struct libscols_table *tb)
 {
 	struct libscols_iter itr;
@@ -467,23 +415,54 @@ void scols_groups_reset_state(struct libscols_table *tb)
 	DBG(TAB, ul_debugobj(tb, "reset groups states"));
 
 	scols_reset_iter(&itr, SCOLS_ITER_FORWARD);
-	while (scols_table_next_group(tb, &itr, &gr) == 0)
+	while (scols_table_next_group(tb, &itr, &gr) == 0) {
+		DBG(GROUP, ul_debugobj(gr, " reset to NONE"));
 		gr->state = SCOLS_GSTATE_NONE;
+	}
 
-	if (tb->grpset)
-		memset(tb->grpset, 0, tb->grpset_size);
+	if (tb->grpset) {
+		DBG(TAB, ul_debugobj(tb, " zeroize grpset"));
+		memset(tb->grpset, 0, tb->grpset_size * sizeof(struct libscols_group *));
+	}
+	tb->ngrpchlds_pending = 0;
 }
 
 static void add_member(struct libscols_group *gr, struct libscols_line *ln)
 {
-	DBG(GROUP, ul_debugobj(gr, "add member"));
+	DBG(GROUP, ul_debugobj(gr, "add member %p", ln));
+
 	ln->group = gr;
 	gr->nmembers++;
 	scols_ref_group(gr);
 
+	INIT_LIST_HEAD(&ln->ln_groups);
 	list_add_tail(&ln->ln_groups, &gr->gr_members);
 	scols_ref_line(ln);
 }
+
+/*
+ * Returns first group which is ready to print group children.
+ *
+ * This function scans grpset[] in backward order and returns first group
+ * with SCOLS_GSTATE_CONT_CHILDREN or SCOLS_GSTATE_LAST_MEMBER state.
+ */
+struct libscols_group *scols_grpset_get_printable_children(struct libscols_table *tb)
+{
+	size_t i;
+
+	for (i = tb->grpset_size; i > 0; i -= SCOLS_GRPSET_CHUNKSIZ) {
+		struct libscols_group *gr = tb->grpset[i-1];
+
+		if (gr == NULL)
+			continue;
+		if (gr->state == SCOLS_GSTATE_CONT_CHILDREN ||
+		    gr->state == SCOLS_GSTATE_LAST_MEMBER)
+			return gr;
+	}
+
+	return NULL;
+}
+
 
 /**
  * scols_table_group_lines:
@@ -516,13 +495,19 @@ int scols_table_group_lines(	struct libscols_table *tb,
 {
 	struct libscols_group *gr = NULL;
 
-	if (!tb || (!ln && !member))
+	if (!tb || !member) {
+		DBG(GROUP, ul_debugobj(gr, "failed group lines (no table or member)"));
 		return -EINVAL;
-	if (ln && member)  {
-		if (ln->group && !member->group)
+	}
+	if (ln)  {
+		if (ln->group && !member->group) {
+			DBG(GROUP, ul_debugobj(gr, "failed group lines (new group, line member of another)"));
 			return -EINVAL;
-		if (ln->group && member->group && ln->group != member->group)
+		}
+		if (ln->group && member->group && ln->group != member->group) {
+			DBG(GROUP, ul_debugobj(gr, "failed group lines (groups mismatch bwteen member and line"));
 			return -EINVAL;
+		}
 	}
 
 	gr = member->group;
@@ -573,6 +558,9 @@ int scols_line_link_group(struct libscols_line *ln, struct libscols_line *member
 		 __attribute__((__unused__)) int id)
 {
 	if (!ln || !member || !member->group || ln->parent)
+		return -EINVAL;
+
+	if (!list_empty(&ln->ln_children))
 		return -EINVAL;
 
 	DBG(GROUP, ul_debugobj(member->group, "add child"));

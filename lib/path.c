@@ -230,10 +230,16 @@ int ul_path_isopen_dirfd(struct path_cxt *pc)
 
 static const char *ul_path_mkpath(struct path_cxt *pc, const char *path, va_list ap)
 {
-	int rc = vsnprintf(pc->path_buffer, sizeof(pc->path_buffer), path, ap);
+	int rc;
 
-	if (rc < 0)
+	errno = 0;
+
+	rc = vsnprintf(pc->path_buffer, sizeof(pc->path_buffer), path, ap);
+	if (rc < 0) {
+		if (!errno)
+			errno = EINVAL;
 		return NULL;
+	}
 
 	if ((size_t)rc >= sizeof(pc->path_buffer)) {
 		errno = ENAMETOOLONG;
@@ -308,7 +314,7 @@ int ul_path_accessf(struct path_cxt *pc, int mode, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	return ul_path_access(pc, mode, p);
+	return !p ? -errno : ul_path_access(pc, mode, p);
 }
 
 int ul_path_open(struct path_cxt *pc, int flags, const char *path)
@@ -338,13 +344,9 @@ int ul_path_open(struct path_cxt *pc, int flags, const char *path)
 
 int ul_path_vopenf(struct path_cxt *pc, int flags, const char *path, va_list ap)
 {
-	const char *p;
+	const char *p = ul_path_mkpath(pc, path, ap);
 
-	p = ul_path_mkpath(pc, path, ap);
-	if (!p)
-		return -errno;
-
-	return ul_path_open(pc, flags, p);
+	return !p ? -errno : ul_path_open(pc, flags, p);
 }
 
 int ul_path_openf(struct path_cxt *pc, int flags, const char *path, ...)
@@ -405,13 +407,9 @@ FILE *ul_path_fopen(struct path_cxt *pc, const char *mode, const char *path)
 
 FILE *ul_path_vfopenf(struct path_cxt *pc, const char *mode, const char *path, va_list ap)
 {
-	const char *p;
+	const char *p = ul_path_mkpath(pc, path, ap);
 
-	p = ul_path_mkpath(pc, path, ap);
-	if (!p)
-		return NULL;
-
-	return ul_path_fopen(pc, mode, p);
+	return !p ? NULL : ul_path_fopen(pc, mode, p);
 }
 
 FILE *ul_path_fopenf(struct path_cxt *pc, const char *mode, const char *path, ...)
@@ -438,8 +436,12 @@ DIR *ul_path_opendir(struct path_cxt *pc, const char *path)
 	if (path)
 		fd = ul_path_open(pc, O_RDONLY|O_CLOEXEC, path);
 	else if (pc->dir_path) {
+		int dirfd;
+
 		DBG(CXT, ul_debugobj(pc, "duplicate dir path"));
-		fd = dup_fd_cloexec(ul_path_get_dirfd(pc), STDERR_FILENO + 1);
+		dirfd = ul_path_get_dirfd(pc);
+		if (dirfd >= 0)
+			fd = dup_fd_cloexec(dirfd, STDERR_FILENO + 1);
 	}
 
 	if (fd < 0)
@@ -462,13 +464,9 @@ DIR *ul_path_opendir(struct path_cxt *pc, const char *path)
  */
 DIR *ul_path_vopendirf(struct path_cxt *pc, const char *path, va_list ap)
 {
-	const char *p;
+	const char *p = ul_path_mkpath(pc, path, ap);
 
-	p = ul_path_mkpath(pc, path, ap);
-	if (!p)
-		return NULL;
-
-	return ul_path_opendir(pc, p);
+	return !p ? NULL : ul_path_opendir(pc, p);
 }
 
 /*
@@ -520,10 +518,7 @@ ssize_t ul_path_readlinkf(struct path_cxt *pc, char *buf, size_t bufsiz, const c
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -errno;
-
-	return ul_path_readlink(pc, buf, bufsiz, p);
+	return !p ? -errno : ul_path_readlink(pc, buf, bufsiz, p);
 }
 
 int ul_path_read(struct path_cxt *pc, char *buf, size_t len, const char *path)
@@ -546,13 +541,9 @@ int ul_path_read(struct path_cxt *pc, char *buf, size_t len, const char *path)
 
 int ul_path_vreadf(struct path_cxt *pc, char *buf, size_t len, const char *path, va_list ap)
 {
-	const char *p;
+	const char *p = ul_path_mkpath(pc, path, ap);
 
-	p = ul_path_mkpath(pc, path, ap);
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read(pc, buf, len, p);
+	return !p ? -errno : ul_path_read(pc, buf, len, p);
 }
 
 int ul_path_readf(struct path_cxt *pc, char *buf, size_t len, const char *path, ...)
@@ -579,13 +570,15 @@ int ul_path_read_string(struct path_cxt *pc, char **str, const char *path)
 	char buf[BUFSIZ];
 	int rc;
 
+	if (!str)
+		return -EINVAL;
+
 	*str = NULL;
-
 	rc = ul_path_read(pc, buf, sizeof(buf) - 1, path);
-	if (rc < 0 || !str)
-		return rc;;
+	if (rc < 0)
+		return rc;
 
-	/* Remove tailing newline (usuall in sysfs) */
+	/* Remove tailing newline (usual in sysfs) */
 	if (rc > 0 && *(buf + rc - 1) == '\n')
 		--rc;
 
@@ -606,19 +599,16 @@ int ul_path_readf_string(struct path_cxt *pc, char **str, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_string(pc, str, p);
+	return !p ? -errno : ul_path_read_string(pc, str, p);
 }
 
 int ul_path_read_buffer(struct path_cxt *pc, char *buf, size_t bufsz, const char *path)
 {
 	int rc = ul_path_read(pc, buf, bufsz - 1, path);
 	if (rc < 0)
-		return rc;;
+		return rc;
 
-	/* Remove tailing newline (usuall in sysfs) */
+	/* Remove tailing newline (usual in sysfs) */
 	if (rc > 0 && *(buf + rc - 1) == '\n')
 		--rc;
 
@@ -635,10 +625,7 @@ int ul_path_readf_buffer(struct path_cxt *pc, char *buf, size_t bufsz, const cha
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_buffer(pc, buf, bufsz, p);
+	return !p ? -errno : ul_path_read_buffer(pc, buf, bufsz, p);
 }
 
 int ul_path_scanf(struct path_cxt *pc, const char *path, const char *fmt, ...)
@@ -702,10 +689,7 @@ int ul_path_readf_s64(struct path_cxt *pc, int64_t *res, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;;
-
-	return ul_path_read_s64(pc, res, p);
+	return !p ? -errno : ul_path_read_s64(pc, res, p);
 }
 
 int ul_path_read_u64(struct path_cxt *pc, uint64_t *res, const char *path)
@@ -730,10 +714,7 @@ int ul_path_readf_u64(struct path_cxt *pc, uint64_t *res, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_u64(pc, res, p);
+	return !p ? -errno : ul_path_read_u64(pc, res, p);
 }
 
 int ul_path_read_s32(struct path_cxt *pc, int *res, const char *path)
@@ -757,10 +738,7 @@ int ul_path_readf_s32(struct path_cxt *pc, int *res, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_s32(pc, res, p);
+	return !p ? -errno : ul_path_read_s32(pc, res, p);
 }
 
 int ul_path_read_u32(struct path_cxt *pc, unsigned int *res, const char *path)
@@ -785,10 +763,7 @@ int ul_path_readf_u32(struct path_cxt *pc, unsigned int *res, const char *path, 
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_u32(pc, res, p);
+	return !p ? -errno : ul_path_read_u32(pc, res, p);
 }
 
 int ul_path_read_majmin(struct path_cxt *pc, dev_t *res, const char *path)
@@ -812,10 +787,7 @@ int ul_path_readf_majmin(struct path_cxt *pc, dev_t *res, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_read_majmin(pc, res, p);
+	return !p ? -errno : ul_path_read_majmin(pc, res, p);
 }
 
 int ul_path_write_string(struct path_cxt *pc, const char *str, const char *path)
@@ -844,10 +816,7 @@ int ul_path_writef_string(struct path_cxt *pc, const char *str, const char *path
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
-
-	return ul_path_write_string(pc, str, p);
+	return !p ? -errno : ul_path_write_string(pc, str, p);
 }
 
 int ul_path_write_s64(struct path_cxt *pc, int64_t num, const char *path)
@@ -903,26 +872,8 @@ int ul_path_writef_u64(struct path_cxt *pc, uint64_t num, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return -EINVAL;
+	return !p ? -errno : ul_path_write_u64(pc, num, p);
 
-	return ul_path_write_u64(pc, num, p);
-
-}
-
-static struct dirent *xreaddir(DIR *dp)
-{
-	struct dirent *d;
-
-	while ((d = readdir(dp))) {
-		if (!strcmp(d->d_name, ".") ||
-		    !strcmp(d->d_name, ".."))
-			continue;
-
-		/* blacklist here? */
-		break;
-	}
-	return d;
 }
 
 int ul_path_count_dirents(struct path_cxt *pc, const char *path)
@@ -949,10 +900,7 @@ int ul_path_countf_dirents(struct path_cxt *pc, const char *path, ...)
 	p = ul_path_mkpath(pc, path, ap);
 	va_end(ap);
 
-	if (!p)
-		return 0;
-
-	return ul_path_count_dirents(pc, p);
+	return !p ? -errno : ul_path_count_dirents(pc, p);
 }
 
 /*
@@ -980,6 +928,7 @@ static int ul_path_cpuparse(struct path_cxt *pc, cpu_set_t **set, int maxcpus, i
 	FILE *f;
 	size_t setsize, len = maxcpus * 7;
 	char buf[len];
+	int rc;
 
 	*set = NULL;
 
@@ -987,9 +936,11 @@ static int ul_path_cpuparse(struct path_cxt *pc, cpu_set_t **set, int maxcpus, i
 	if (!f)
 		return -errno;
 
-	if (!fgets(buf, len, f))
-		return -errno;
+	rc = fgets(buf, len, f) == NULL ? -errno : 0;
 	fclose(f);
+
+	if (rc)
+		return rc;
 
 	len = strlen(buf);
 	if (buf[len - 1] == '\n')

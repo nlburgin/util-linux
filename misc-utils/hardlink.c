@@ -42,14 +42,7 @@
 #include "closestream.h"
 
 #define NHASH   (1<<17)  /* Must be a power of 2! */
-#define NIOBUF  (1<<12)
 #define NBUF    64
-
-#ifdef HAVE_PCRE
-pcre2_code *re;
-PCRE2_SPTR exclude_pattern;
-pcre2_match_data *match_data;
-#endif
 
 struct hardlink_file;
 
@@ -62,7 +55,7 @@ struct hardlink_hash {
 
 struct hardlink_dir {
 	struct hardlink_dir *next;
-	char name[0];
+	char name[];
 };
 
 struct hardlink_file {
@@ -70,7 +63,7 @@ struct hardlink_file {
 	ino_t ino;
 	dev_t dev;
 	unsigned int cksum;
-	char name[0];
+	char name[];
 };
 
 struct hardlink_dynstr {
@@ -78,20 +71,29 @@ struct hardlink_dynstr {
 	size_t alloc;
 };
 
-static struct hardlink_dir *dirs;
-static struct hardlink_hash *hps[NHASH];
-
-static int no_link = 0;
-static int verbose = 0;
-static int content_only = 0;
-static int force = 0;
-static dev_t dev = 0;
-
-/* summary counters */
-static unsigned long long ndirs, nobjects, nregfiles, ncomp, nlinks, nsaved;
-
-static unsigned int buf[NBUF];
-static char iobuf1[NIOBUF], iobuf2[NIOBUF];
+struct hardlink_ctl {
+	struct hardlink_dir *dirs;
+	struct hardlink_hash *hps[NHASH];
+	char iobuf1[BUFSIZ];
+	char iobuf2[BUFSIZ];
+	/* summary counters */
+	unsigned long long ndirs;
+	unsigned long long nobjects;
+	unsigned long long nregfiles;
+	unsigned long long ncomp;
+	unsigned long long nlinks;
+	unsigned long long nsaved;
+	/* current device */
+	dev_t dev;
+	/* flags */
+	unsigned int verbose;
+	unsigned int
+		no_link:1,
+		content_only:1,
+		force:1;
+};
+/* ctl is in global scope due use in atexit() */
+struct hardlink_ctl global_ctl;
 
 __attribute__ ((always_inline))
 static inline unsigned int hash(off_t size, time_t mtime)
@@ -100,9 +102,9 @@ static inline unsigned int hash(off_t size, time_t mtime)
 }
 
 __attribute__ ((always_inline))
-static inline int stcmp(struct stat *st1, struct stat *st2, int content_only)
+static inline int stcmp(struct stat *st1, struct stat *st2, int content_scope)
 {
-	if (content_only)
+	if (content_scope)
 		return st1->st_size != st2->st_size;
 
 	return st1->st_mode != st2->st_mode
@@ -114,22 +116,24 @@ static inline int stcmp(struct stat *st1, struct stat *st2, int content_only)
 
 static void print_summary(void)
 {
-	if (!verbose)
+	struct hardlink_ctl const *const ctl = &global_ctl;
+
+	if (!ctl->verbose)
 		return;
 
-	if (verbose > 1 && nlinks)
+	if (ctl->verbose > 1 && ctl->nlinks)
 		fputc('\n', stdout);
 
-	printf(_("Directories:   %9lld\n"), ndirs);
-	printf(_("Objects:       %9lld\n"), nobjects);
-	printf(_("Regular files: %9lld\n"), nregfiles);
-	printf(_("Comparisons:   %9lld\n"), ncomp);
-	printf("%s%9lld\n", (no_link ?
+	printf(_("Directories:   %9lld\n"), ctl->ndirs);
+	printf(_("Objects:       %9lld\n"), ctl->nobjects);
+	printf(_("Regular files: %9lld\n"), ctl->nregfiles);
+	printf(_("Comparisons:   %9lld\n"), ctl->ncomp);
+	printf(  "%s%9lld\n", (ctl->no_link ?
 	       _("Would link:    ") :
-	       _("Linked:        ")), nlinks);
-	printf("%s %9lld\n", (no_link ?
-		_("Would save:   ") :
-		_("Saved:        ")), nsaved);
+	       _("Linked:        ")), ctl->nlinks);
+	printf(  "%s %9lld\n", (ctl->no_link ?
+	       _("Would save:   ") :
+	       _("Saved:        ")), ctl->nsaved);
 }
 
 static void __attribute__((__noreturn__)) usage(void)
@@ -177,42 +181,43 @@ static void growstr(struct hardlink_dynstr *str, size_t newlen)
 	str->buf = xrealloc(str->buf, str->alloc = add2(newlen, 1));
 }
 
-static void process_path(const char *name)
+static void process_path(struct hardlink_ctl *ctl, const char *name)
 {
 	struct stat st, st2, st3;
 	const size_t namelen = strlen(name);
 
-	nobjects++;
+	ctl->nobjects++;
 	if (lstat(name, &st))
 		return;
 
-	if (st.st_dev != dev && !force) {
-		if (dev)
+	if (st.st_dev != ctl->dev && !ctl->force) {
+		if (ctl->dev)
 			errx(EXIT_FAILURE,
 			     _("%s is on different filesystem than the rest "
 			       "(use -f option to override)."), name);
-		dev = st.st_dev;
+		ctl->dev = st.st_dev;
 	}
 	if (S_ISDIR(st.st_mode)) {
 		struct hardlink_dir *dp = xmalloc(add3(sizeof(*dp), namelen, 1));
 		memcpy(dp->name, name, namelen + 1);
-		dp->next = dirs;
-		dirs = dp;
+		dp->next = ctl->dirs;
+		ctl->dirs = dp;
 
 	} else if (S_ISREG(st.st_mode)) {
 		int fd, i;
 		struct hardlink_file *fp, *fp2;
 		struct hardlink_hash *hp;
 		const char *n1, *n2;
+		unsigned int buf[NBUF];
 		int cksumsize = sizeof(buf);
 		unsigned int cksum;
-		time_t mtime = content_only ? 0 : st.st_mtime;
+		time_t mtime = ctl->content_only ? 0 : st.st_mtime;
 		unsigned int hsh = hash(st.st_size, mtime);
 		off_t fsize;
 
-		nregfiles++;
-		if (verbose > 1)
-			printf("  %s", name);
+		ctl->nregfiles++;
+		if (ctl->verbose > 1)
+			printf("%s\n", name);
 
 		fd = open(name, O_RDONLY);
 		if (fd < 0)
@@ -225,8 +230,6 @@ static void process_path(const char *name)
 		}
 		if (read(fd, buf, cksumsize) != cksumsize) {
 			close(fd);
-			if (verbose > 1 && namelen <= PATH_MAX)
-				printf("\r%*s\r", (int)(namelen + 2), "");
 			return;
 		}
 		cksumsize = (cksumsize + sizeof(buf[0]) - 1) / sizeof(buf[0]);
@@ -236,7 +239,7 @@ static void process_path(const char *name)
 			else
 				cksum += buf[i];
 		}
-		for (hp = hps[hsh]; hp; hp = hp->next) {
+		for (hp = ctl->hps[hsh]; hp; hp = hp->next) {
 			if (hp->size == st.st_size && hp->mtime == mtime)
 				break;
 		}
@@ -245,8 +248,8 @@ static void process_path(const char *name)
 			hp->size = st.st_size;
 			hp->mtime = mtime;
 			hp->chain = NULL;
-			hp->next = hps[hsh];
-			hps[hsh] = hp;
+			hp->next = ctl->hps[hsh];
+			ctl->hps[hsh] = hp;
 		}
 		for (fp = hp->chain; fp; fp = fp->next) {
 			if (fp->cksum == cksum)
@@ -255,15 +258,13 @@ static void process_path(const char *name)
 		for (fp2 = fp; fp2 && fp2->cksum == cksum; fp2 = fp2->next) {
 			if (fp2->ino == st.st_ino && fp2->dev == st.st_dev) {
 				close(fd);
-				if (verbose > 1 && namelen <= PATH_MAX)
-					printf("\r%*s\r", (int)(namelen + 2), "");
 				return;
 			}
 		}
 		for (fp2 = fp; fp2 && fp2->cksum == cksum; fp2 = fp2->next) {
 
 			if (!lstat(fp2->name, &st2) && S_ISREG(st2.st_mode) &&
-			    !stcmp(&st, &st2, content_only) &&
+			    !stcmp(&st, &st2, ctl->content_only) &&
 			    st2.st_ino != st.st_ino &&
 			    st2.st_dev == st.st_dev) {
 
@@ -276,17 +277,18 @@ static void process_path(const char *name)
 					close(fd2);
 					continue;
 				}
-				ncomp++;
+				ctl->ncomp++;
 				lseek(fd, 0, SEEK_SET);
 
 				for (fsize = st.st_size; fsize > 0;
-				     fsize -= NIOBUF) {
+				     fsize -= (off_t)sizeof(ctl->iobuf1)) {
 					ssize_t xsz;
-					off_t rsize = fsize >= NIOBUF ? NIOBUF : fsize;
+					ssize_t rsize = fsize > (ssize_t) sizeof(ctl->iobuf1) ?
+							(ssize_t) sizeof(ctl->iobuf1) : fsize;
 
-					if ((xsz = read(fd, iobuf1, rsize)) != rsize)
+					if ((xsz = read(fd, ctl->iobuf1, rsize)) != rsize)
 						warn(_("cannot read %s"), name);
-					else if ((xsz = read(fd2, iobuf2, rsize)) != rsize)
+					else if ((xsz = read(fd2, ctl->iobuf2, rsize)) != rsize)
 						warn(_("cannot read %s"), fp2->name);
 
 					if (xsz != rsize) {
@@ -294,7 +296,7 @@ static void process_path(const char *name)
 						close(fd2);
 						return;
 					}
-					if (memcmp(iobuf1, iobuf2, rsize))
+					if (memcmp(ctl->iobuf1, ctl->iobuf2, rsize))
 						break;
 				}
 				close(fd2);
@@ -314,7 +316,7 @@ static void process_path(const char *name)
 				n1 = fp2->name;
 				n2 = name;
 
-				if (!no_link) {
+				if (!ctl->no_link) {
 					const char *suffix =
 					    ".$$$___cleanit___$$$";
 					const size_t suffixlen = strlen(suffix);
@@ -344,25 +346,21 @@ static void process_path(const char *name)
 					}
 					free(nam2.buf);
 				}
-				nlinks++;
+				ctl->nlinks++;
 				if (st3.st_nlink > 1) {
 					/* We actually did not save anything this time, since the link second argument
 					   had some other links as well.  */
-					if (verbose > 1)
-						printf(_("\r%*s\r%s %s to %s\n"),
-							(int)(((namelen > PATH_MAX) ? 0 : namelen) + 2),
-							"",
-							(no_link ? _("Would link") : _("Linked")),
+					if (ctl->verbose > 1)
+						printf(_(" %s %s to %s\n"),
+							(ctl->no_link ? _("Would link") : _("Linked")),
 							n1, n2);
 				} else {
-					nsaved += ((st.st_size + 4095) / 4096) * 4096;
-					if (verbose > 1)
-						printf(_("\r%*s\r%s %s to %s, %s %jd\n"),
-							(int)(((namelen > PATH_MAX) ? 0 : namelen) + 2),
-							"",
-							(no_link ? _("Would link") : _("Linked")),
+					ctl->nsaved += ((st.st_size + 4095) / 4096) * 4096;
+					if (ctl->verbose > 1)
+						printf(_(" %s %s to %s, %s %jd\n"),
+							(ctl->no_link ? _("Would link") : _("Linked")),
 							n1, n2,
-							(no_link ? _("would save") : _("saved")),
+							(ctl->no_link ? _("would save") : _("saved")),
 							(intmax_t)st.st_size);
 				}
 				close(fd);
@@ -383,8 +381,6 @@ static void process_path(const char *name)
 			fp2->next = hp->chain;
 			hp->chain = fp2;
 		}
-		if (verbose > 1 && namelen <= PATH_MAX)
-			printf("\r%*s\r", (int)(namelen + 2), "");
 		return;
 	}
 }
@@ -396,8 +392,12 @@ int main(int argc, char **argv)
 #ifdef HAVE_PCRE
 	int errornumber;
 	PCRE2_SIZE erroroffset;
+	pcre2_code *re;
+	PCRE2_SPTR exclude_pattern = NULL;
+	pcre2_match_data *match_data;
 #endif
 	struct hardlink_dynstr nam1 = { NULL, 0 };
+	struct hardlink_ctl *ctl = &global_ctl;
 
 	static const struct option longopts[] = {
 		{ "content",    no_argument, NULL, 'c' },
@@ -413,21 +413,21 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	while ((ch = getopt_long(argc, argv, "cnvfx:Vh", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'n':
-			no_link++;
+			ctl->no_link = 1;
 			break;
 		case 'v':
-			verbose++;
+			ctl->verbose++;
 			break;
 		case 'c':
-			content_only++;
+			ctl->content_only = 1;
 			break;
 		case 'f':
-			force = 1;
+			ctl->force = 1;
 			break;
 		case 'x':
 #ifdef HAVE_PCRE
@@ -438,8 +438,7 @@ int main(int argc, char **argv)
 #endif
 			break;
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'h':
 			usage();
 		default:
@@ -471,15 +470,15 @@ int main(int argc, char **argv)
 	atexit(print_summary);
 
 	for (i = optind; i < argc; i++)
-		process_path(argv[i]);
+		process_path(ctl, argv[i]);
 
-	while (dirs) {
+	while (ctl->dirs) {
 		DIR *dh;
 		struct dirent *di;
-		struct hardlink_dir *dp = dirs;
+		struct hardlink_dir *dp = ctl->dirs;
 		size_t nam1baselen = strlen(dp->name);
 
-		dirs = dp->next;
+		ctl->dirs = dp->next;
 		growstr(&nam1, add2(nam1baselen, 1));
 		memcpy(nam1.buf, dp->name, nam1baselen);
 		free(dp);
@@ -489,7 +488,7 @@ int main(int argc, char **argv)
 
 		if (dh == NULL)
 			continue;
-		ndirs++;
+		ctl->ndirs++;
 
 		while ((di = readdir(dh)) != NULL) {
 			if (!di->d_name[0])
@@ -505,7 +504,7 @@ int main(int argc, char **argv)
 					      match_data, /* block for storing the result */
 					      NULL) /* use default match context */
 			    >=0) {
-				if (verbose) {
+				if (ctl->verbose) {
 					nam1.buf[nam1baselen] = 0;
 					printf(_("Skipping %s%s\n"), nam1.buf, di->d_name);
 				}
@@ -520,7 +519,7 @@ int main(int argc, char **argv)
 				memcpy(&nam1.buf[nam1baselen], di->d_name,
 				       add2(subdirlen, 1));
 			}
-			process_path(nam1.buf);
+			process_path(ctl, nam1.buf);
 		}
 		closedir(dh);
 	}

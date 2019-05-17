@@ -18,6 +18,11 @@ TS_DESC="name_to_number"
 . "$TS_TOPDIR/functions.sh"
 ts_init "$*"
 
+# make sure we do not use shell built-in command
+if [ "$TS_USE_SYSTEM_COMMANDS" == "yes" ]; then
+	TS_CMD_KILL="/bin/kill"
+fi
+
 ts_check_test_command "$TS_CMD_KILL"
 ts_check_test_command "$TS_HELPER_SIGRECEIVE"
 
@@ -33,7 +38,7 @@ for SIG in $($TS_CMD_KILL -L); do
 		EXPECTED=$SIG
 		continue
 	fi
-	if [ -f "$ASAN_SYMBOLIZER_PATH" ] && [ "x$SIG" = "xSEGV" ]; then
+	if [ "$TS_ENABLE_ASAN" == "yes" ] && [ "x$SIG" = "xSEGV" ]; then
 		continue
 	fi
 	if [ "x$SIG" = "xSTOP" ] || [ "x$SIG" = "xKILL" ]; then

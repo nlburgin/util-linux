@@ -1284,7 +1284,7 @@ static void termio_init(struct options *op, struct termios *tp)
 	 * later on.
 	 */
 
-	/* The defaul is set c_iflag in termio_final() according to chardata.
+	/* The default is set c_iflag in termio_final() according to chardata.
 	 * Unfortunately, the chardata are not set according to the serial line
 	 * if --autolog is enabled. In this case we do not read from the line
 	 * at all. The best what we can do in this case is to keep c_iflag
@@ -2059,7 +2059,7 @@ static char *get_logname(struct issue *ie, struct options *op, struct termios *t
 		sleep(1);
 	tcflush(STDIN_FILENO, TCIFLUSH);
 
-	eightbit = (op->flags & F_EIGHTBITS);
+	eightbit = (op->flags & (F_EIGHTBITS|F_UTF8));
 	bp = logname;
 	*bp = '\0';
 
@@ -2175,8 +2175,6 @@ static char *get_logname(struct issue *ie, struct options *op, struct termios *t
 			case CTL('D'):
 				exit(EXIT_SUCCESS);
 			default:
-				if (!isascii(ascval) || !isprint(ascval))
-					break;
 				if ((size_t)(bp - logname) >= sizeof(logname) - 1)
 					log_err(_("%s: input overrun"), op->tty);
 				if ((tp->c_lflag & ECHO) == 0)

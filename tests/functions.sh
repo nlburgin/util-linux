@@ -75,9 +75,25 @@ function ts_report {
 }
 
 function ts_check_test_command {
-	if [ ! -x "$1" ]; then
-		ts_skip "${1##*/} not found"
-	fi
+	case "$1" in
+	*/*)
+		# paths
+		if [ ! -x "$1" ]; then
+			ts_skip "${1##*/} not found"
+		fi
+		;;
+	*)
+		# just command names (e.g. --use-system-commands)
+		local cmd=$1
+		type "$cmd" >/dev/null 2>&1
+	        if [ $? -ne 0 ]; then
+			if [ "$TS_NOSKIP_COMMANDS" = "yes" ]; then
+				ts_failed "missing in PATH: $cmd"
+			fi
+			ts_skip "missing in PATH: $cmd"
+		fi
+		;;
+	esac
 }
 
 function ts_check_prog {
@@ -254,8 +270,20 @@ function ts_init_env {
 	top_srcdir=$(ts_abspath $top_srcdir)
 	top_builddir=$(ts_abspath $top_builddir)
 
-	# some ul commands search other ul commands in $PATH
-	export PATH="$top_builddir:$PATH"
+	# We use helpser always from build tree
+	ts_helpersdir="${top_builddir}/"
+
+	TS_USE_SYSTEM_COMMANDS=$(ts_has_option "use-system-commands" "$*")
+	if [ "$TS_USE_SYSTEM_COMMANDS" == "yes" ]; then
+		# Don't define anything, just follow current PATH
+		ts_commandsdir=""
+	else
+		# The default is to use commands from build tree
+		ts_commandsdir="${top_builddir}/"
+
+		# some ul commands search other ul commands in $PATH
+		export PATH="$ts_commandsdir:$PATH"
+	fi
 
 	TS_SCRIPT="$mydir/$(basename $0)"
 	TS_SUBDIR=$(dirname $TS_SCRIPT)
@@ -279,6 +307,7 @@ function ts_init_env {
 
 	ts_init_core_env
 
+	TS_NOSKIP_COMMANDS=$(ts_has_option "noskip-commands" "$*")
 	TS_VERBOSE=$(ts_has_option "verbose" "$*")
 	TS_SHOWDIFF=$(ts_has_option "show-diff" "$*")
 	TS_PARALLEL=$(ts_has_option "parallel" "$*")
@@ -319,6 +348,8 @@ function ts_init_env {
 	if [ "$TS_VERBOSE" == "yes" ]; then
 		echo
 		echo "     script: $TS_SCRIPT"
+		echo "   commands: $ts_commandsdir"
+		echo "    helpers: $ts_helpersdir"
 		echo "    sub dir: $TS_SUBDIR"
 		echo "    top dir: $TS_TOPDIR"
 		echo "       self: $TS_SELF"

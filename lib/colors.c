@@ -36,7 +36,7 @@
 #include "debug.h"
 
 /*
- * Default behavior, maybe be override by terminal-colors.d/{enable,disable}.
+ * Default behavior, may be overriden by terminal-colors.d/{enable,disable}.
  */
 #ifdef USE_COLORS_BY_DEFAULT
 # define UL_COLORMODE_DEFAULT	UL_COLORMODE_AUTO	/* check isatty() */
@@ -424,8 +424,10 @@ static int cn_sequence(const char *str, char **seq)
 		in++;
 	}
 
-	assert ((out - *seq) <= len);
-	*out = '\0';
+	if (out) {
+		assert ((out - *seq) <= len);
+		*out = '\0';
+	}
 
 	return 0;
 }

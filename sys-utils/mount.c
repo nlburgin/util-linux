@@ -73,7 +73,7 @@ static void __attribute__((__noreturn__)) exit_non_root(const char *option)
 	errx(MNT_EX_USAGE, _("only root can do that"));
 }
 
-static void __attribute__((__noreturn__)) print_version(void)
+static void __attribute__((__noreturn__)) mount_print_version(void)
 {
 	const char *ver = NULL;
 	const char **features = NULL, **p;
@@ -655,7 +655,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	strutils_set_exitcode(MNT_EX_USAGE);
 
@@ -691,9 +691,6 @@ int main(int argc, char **argv)
 		case 'F':
 			mnt_context_enable_fork(cxt, TRUE);
 			break;
-		case 'h':
-			usage();
-			break;
 		case 'i':
 			mnt_context_disable_helpers(cxt, TRUE);
 			break;
@@ -706,9 +703,6 @@ int main(int argc, char **argv)
 			break;
 		case 'v':
 			mnt_context_enable_verbose(cxt, TRUE);
-			break;
-		case 'V':
-			print_version();
 			break;
 		case 'w':
 			append_option(cxt, "rw");
@@ -829,6 +823,13 @@ int main(int argc, char **argv)
 		case MOUNT_OPT_OPTSRC_FORCE:
 			optmode |= MNT_OMODE_FORCE;
 			break;
+
+		case 'h':
+			mnt_free_context(cxt);
+			usage();
+		case 'V':
+			mnt_free_context(cxt);
+			mount_print_version();
 		default:
 			errtryhelp(MNT_EX_USAGE);
 		}

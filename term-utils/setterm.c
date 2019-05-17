@@ -231,10 +231,13 @@ static int parse_ulhb_color(char **av, int *oi)
 	color = parse_color(color_name);
 	if (color < 0)
 		color = strtos32_or_err(color_name, _("argument error"));
-	if (!is_valid_color(color))
+	if (!is_valid_color(color) || color == DEFAULT)
 		errx(EXIT_FAILURE, "%s: %s", _("argument error"), color_name);
 	if (bright && (color == BLACK || color == GREY))
 		errx(EXIT_FAILURE, _("argument error: bright %s is not supported"), color_name);
+
+	if (bright)
+		color |= 8;
 
 	return color;
 }
@@ -396,7 +399,7 @@ static void __attribute__((__noreturn__)) usage(void)
 	fputs(_(" --foreground    default|<color>   set foreground color\n"), out);
 	fputs(_(" --background    default|<color>   set background color\n"), out);
 	fputs(_(" --ulcolor       [bright] <color>  set underlined text color\n"), out);
-	fputs(_(" --hbcolor       [bright] <color>  set bold text color\n"), out);
+	fputs(_(" --hbcolor       [bright] <color>  set half-bright text color\n"), out);
 	fputs(_("                 <color>: black blue cyan green grey magenta red white yellow\n"), out);
 	fputs(_(" --bold          [on|off]          bold\n"), out);
 	fputs(_(" --half-bright   [on|off]          dim\n"), out);
@@ -670,9 +673,9 @@ static void parse_option(struct setterm_control *ctl, int ac, char **av)
 			ctl->opt_bfreq = set_opt_flag(ctl->opt_bfreq);
 			ctl->opt_bfreq_f = parse_bfreq(av, optarg, &optind);
 			break;
+
 		case OPT_VERSION:
-			printf(UTIL_LINUX_VERSION);
-			exit(EXIT_SUCCESS);
+			print_version(EXIT_SUCCESS);
 		case OPT_HELP:
 			usage();
 		default:
@@ -973,11 +976,11 @@ static void perform_sequence(struct setterm_control *ctl)
 	if (ctl->opt_background)
 		printf("\033[4%c%s", '0' + ctl->opt_ba_color, "m");
 
-	/* -ulcolor black|red|green|yellow|blue|magenta|cyan|white|default. */
+	/* -ulcolor [bright] black|red|green|yellow|blue|magenta|cyan|white. */
 	if (ctl->opt_ulcolor && vc_only(ctl, "--ulcolor"))
 		printf("\033[1;%d]", ctl->opt_ul_color);
 
-	/* -hbcolor black|red|green|yellow|blue|magenta|cyan|white|default. */
+	/* -hbcolor [bright] black|red|green|yellow|blue|magenta|cyan|white. */
 	if (ctl->opt_hbcolor)
 		printf("\033[2;%d]", ctl->opt_hb_color);
 
@@ -1170,7 +1173,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	if (argc < 2) {
 		warnx(_("bad usage"));

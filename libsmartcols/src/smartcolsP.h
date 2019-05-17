@@ -97,6 +97,9 @@ struct libscols_column {
 	size_t	width_treeart;	/* size of the tree ascii art */
 	double	width_hint;	/* hint (N < 1 is in percent of termwidth) */
 
+	size_t	extreme_sum;
+	int	extreme_count;
+
 	int	json_type;	/* SCOLS_JSON_* */
 
 	int	flags;
@@ -142,6 +145,11 @@ enum {
 	SCOLS_GSTATE_CONT_MEMBERS,
 	SCOLS_GSTATE_CONT_CHILDREN
 };
+
+/*
+ * Every group needs at least 3 columns
+ */
+#define SCOLS_GRPSET_CHUNKSIZ	3
 
 struct libscols_group {
 	int     refcount;
@@ -210,10 +218,13 @@ struct libscols_table {
 	struct libscols_group	**grpset;
 	size_t			grpset_size;
 
+	size_t			ngrpchlds_pending;	/* groups with not yet printed children */
+	struct libscols_line	*walk_last_tree_root;	/* last root, used by scols_walk_() */
+
 	struct libscols_symbols	*symbols;
 	struct libscols_cell	title;		/* optional table title (for humans) */
 
-	int	indent;		/* indention counter */
+	int	indent;		/* indentation counter */
 	int	indent_last_sep;/* last printed has been line separator */
 	int	format;		/* SCOLS_FMT_* */
 
@@ -225,10 +236,12 @@ struct libscols_table {
 			colors_wanted	:1,	/* enable colors */
 			is_term		:1,	/* isatty() */
 			padding_debug	:1,	/* output visible padding chars */
+			is_dummy_print	:1,	/* printing used for width calcualion only */
 			maxout		:1,	/* maximize output */
 			header_repeat   :1,     /* print header after libscols_table->termheight */
 			header_printed  :1,	/* header already printed */
 			priv_symbols	:1,	/* default private symbols */
+			walk_last_done	:1,	/* last tree root walked */
 			no_headings	:1,	/* don't print header */
 			no_encode	:1,	/* don't care about control and non-printable chars */
 			no_linesep	:1,	/* don't print line separator */
@@ -303,9 +316,21 @@ void scols_group_remove_children(struct libscols_group *gr);
 void scols_group_remove_members(struct libscols_group *gr);
 void scols_unref_group(struct libscols_group *gr);
 void scols_groups_fix_members_order(struct libscols_table *tb);
-int scols_groups_calculate_grpset(struct libscols_table *tb);
 int scols_groups_update_grpset(struct libscols_table *tb, struct libscols_line *ln);
 void scols_groups_reset_state(struct libscols_table *tb);
+struct libscols_group *scols_grpset_get_printable_children(struct libscols_table *tb);
+
+/*
+ * walk.c
+ */
+extern int scols_walk_tree(struct libscols_table *tb,
+                    struct libscols_column *cl,
+                    int (*callback)(struct libscols_table *,
+                                    struct libscols_line *,
+                                    struct libscols_column *,
+                                    void *),
+                    void *data);
+extern int scols_walk_is_last(struct libscols_table *tb, struct libscols_line *ln);
 
 /*
  * calculate.c
@@ -342,12 +367,38 @@ extern void fput_children_close(struct libscols_table *tb);
 extern void fput_line_open(struct libscols_table *tb);
 extern void fput_line_close(struct libscols_table *tb, int last, int last_in_table);
 
+static inline int is_tree_root(struct libscols_line *ln)
+{
+	return ln && !ln->parent && !ln->parent_group;
+}
+
+static inline int is_last_tree_root(struct libscols_table *tb, struct libscols_line *ln)
+{
+	if (!ln || !tb || tb->walk_last_tree_root != ln)
+		return 0;
+
+	return 1;
+}
+
+static inline int is_child(struct libscols_line *ln)
+{
+	return ln && ln->parent;
+}
+
 static inline int is_last_child(struct libscols_line *ln)
 {
 	if (!ln || !ln->parent)
-		return 1;
+		return 0;
 
 	return list_entry_is_last(&ln->ln_children, &ln->parent->ln_branch);
+}
+
+static inline int is_first_child(struct libscols_line *ln)
+{
+	if (!ln || !ln->parent)
+		return 0;
+
+	return list_entry_is_first(&ln->ln_children, &ln->parent->ln_branch);
 }
 
 

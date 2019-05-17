@@ -276,29 +276,26 @@ static void pty_create(struct su_context *su)
 
 	if (su->isterm) {
 	        DBG(PTY, ul_debug("create for terminal"));
-		struct winsize win;
 
 		/* original setting of the current terminal */
 		if (tcgetattr(STDIN_FILENO, &su->stdin_attrs) != 0)
 			err(EXIT_FAILURE, _("failed to get terminal attributes"));
+		ioctl(STDIN_FILENO, TIOCGWINSZ, (char *)&su->win);
+		/* create master+slave */
+		rc = openpty(&su->pty_master, &su->pty_slave, NULL, &su->stdin_attrs, &su->win);
 
-		/* reuse the current terminal setting for slave */
+		/* set the current terminal to raw mode; pty_cleanup() reverses this change on exit */
 		slave_attrs = su->stdin_attrs;
 		cfmakeraw(&slave_attrs);
-
-		ioctl(STDIN_FILENO, TIOCGWINSZ, (char *)&su->win);
-
-		/* create master+slave */
-		rc = openpty(&su->pty_master, &su->pty_slave, NULL, &slave_attrs, &win);
-
+		slave_attrs.c_lflag &= ~ECHO;
+		tcsetattr(STDIN_FILENO, TCSANOW, &slave_attrs);
 	} else {
 	        DBG(PTY, ul_debug("create for non-terminal"));
 		rc = openpty(&su->pty_master, &su->pty_slave, NULL, NULL, NULL);
 
-		/* set slave attributes */
 		if (!rc) {
 			tcgetattr(su->pty_slave, &slave_attrs);
-			cfmakeraw(&slave_attrs);
+			slave_attrs.c_lflag &= ~ECHO;
 			tcsetattr(su->pty_slave, TCSANOW, &slave_attrs);
 		}
 	}
@@ -311,12 +308,14 @@ static void pty_create(struct su_context *su)
 
 static void pty_cleanup(struct su_context *su)
 {
-	if (su->pty_master == -1)
+	struct termios rtt;
+
+	if (su->pty_master == -1 || !su->isterm)
 		return;
 
 	DBG(PTY, ul_debug("cleanup"));
-	if (su->isterm)
-		tcsetattr(STDIN_FILENO, TCSADRAIN, &su->stdin_attrs);
+	rtt = su->stdin_attrs;
+	tcsetattr(STDIN_FILENO, TCSADRAIN, &rtt);
 }
 
 static int write_output(char *obuf, ssize_t bytes)
@@ -438,7 +437,10 @@ static int pty_handle_signal(struct su_context *su, int fd)
 
 		/* The child terminated or stopped. Note that we ignore SIGCONT
 		 * here, because stop/cont semantic is handled by wait_for_child() */
-		if (info.ssi_code == CLD_EXITED || info.ssi_status == SIGSTOP)
+		if (info.ssi_code == CLD_EXITED
+		    || info.ssi_code == CLD_KILLED
+		    || info.ssi_code == CLD_DUMPED
+		    || info.ssi_status == SIGSTOP)
 			wait_for_child(su);
 		/* The child is dead, force poll() timeout. */
 		if (su->child == (pid_t) -1)
@@ -732,7 +734,7 @@ static void supam_authenticate(struct su_context *su)
 		msg = pam_strerror(su->pamh, rc);
 		pam_end(su->pamh, rc);
 		sleep(getlogindefs_num("FAIL_DELAY", 1));
-		errx(EXIT_FAILURE, "%s", msg ? msg : _("incorrect password"));
+		errx(EXIT_FAILURE, "%s", msg ? msg : _("authentication failed"));
 	}
 }
 
@@ -1014,7 +1016,7 @@ static void modify_environment(struct su_context *su, const char *shell)
 
 		/* Note that original su(1) has allocated environ[] by malloc
 		 * to the number of expected variables. This seems unnecessary
-		 * optimization as libc later realloc(current_size+2) and for
+		 * optimization as libc later re-alloc(current_size+2) and for
 		 * empty environ[] the curren_size is zero. It seems better to
 		 * keep all logic around environment in glibc's hands.
 		 *                                           --kzak [Aug 2018]
@@ -1319,7 +1321,7 @@ int su_main(int argc, char **argv, int mode)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	su_init_debug();
 	su->conv.appdata_ptr = (void *) su;
@@ -1390,9 +1392,7 @@ int su_main(int argc, char **argv, int mode)
 			usage(mode);
 
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			exit(EXIT_SUCCESS);
-
+			print_version(EXIT_SUCCESS);
 		default:
 			errtryhelp(EXIT_FAILURE);
 		}

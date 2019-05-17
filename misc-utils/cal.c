@@ -332,7 +332,7 @@ int main(int argc, char **argv)
 	setlocale(LC_ALL, "");
 	bindtextdomain(PACKAGE, LOCALEDIR);
 	textdomain(PACKAGE);
-	atexit(close_stdout);
+	close_stdout_atexit();
 
 	term = getenv("TERM");
 	if (term) {
@@ -435,8 +435,7 @@ int main(int argc, char **argv)
 			ctl.reform_year = ISO;
 			break;
 		case 'V':
-			printf(UTIL_LINUX_VERSION);
-			return EXIT_SUCCESS;
+			print_version(EXIT_SUCCESS);
 		case 'h':
 			usage();
 		default:
@@ -561,7 +560,7 @@ int main(int argc, char **argv)
 			;
 		} else {
 			/* disable */
-			Senter = Sexit = '\0';
+			Senter = ""; Sexit = "";
 			ctl.req.day = 0;
 			ctl.weektype &= ~WEEK_NUM_MASK;
 		}

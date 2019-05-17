@@ -313,13 +313,16 @@ static void blkid_probe_set_partlist(blkid_probe pr, blkid_partlist ls)
 
 static void ref_parttable(blkid_parttable tab)
 {
-	tab->nparts++;
+	if (tab)
+		tab->nparts++;
 }
 
 static void unref_parttable(blkid_parttable tab)
 {
-	tab->nparts--;
+	if (!tab)
+		return;
 
+	tab->nparts--;
 	if (tab->nparts <= 0) {
 		list_del(&tab->t_tabs);
 		free(tab);
@@ -1010,7 +1013,7 @@ blkid_partition blkid_partlist_get_partition_by_partno(blkid_partlist ls, int n)
 blkid_partition blkid_partlist_devno_to_partition(blkid_partlist ls, dev_t devno)
 {
 	struct path_cxt *pc;
-	uint64_t start, size;
+	uint64_t start = 0, size;
 	int i, rc, partno = 0;
 
 	DBG(LOWPROBE, ul_debug("trying to convert devno 0x%llx to partition",

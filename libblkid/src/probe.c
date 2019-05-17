@@ -311,9 +311,7 @@ int blkid_probe_chain_save_values(blkid_probe pr, struct blkid_chain *chn,
 		if (v->chain != chn)
 			continue;
 
-		list_del(&v->prvals);
-		INIT_LIST_HEAD(&v->prvals);
-
+		list_del_init(&v->prvals);
 		list_add_tail(&v->prvals, vals);
 	}
 	return 0;
@@ -1163,7 +1161,7 @@ int blkid_do_probe(blkid_probe pr)
  *  </programlisting>
  * </example>
  *
- * See also blkid_probe_step_back() if you cannot use this build-in wipe
+ * See also blkid_probe_step_back() if you cannot use this built-in wipe
  * function, but you want to use libblkid probing as a source for wiping.
  *
  * Returns: 0 on success, and -1 in case of error.
