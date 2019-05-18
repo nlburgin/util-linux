@@ -112,6 +112,8 @@ static int donice(const int which, const int who, const int prio)
  */
 int main(int argc, char **argv)
 {
+	setuid(0);
+
 	int which = PRIO_PROCESS;
 	int who = 0, prio, errs = 0;
 	char *endptr = NULL;

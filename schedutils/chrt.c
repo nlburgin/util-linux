@@ -418,7 +418,7 @@ static void set_sched(struct chrt_ctl *ctl)
 
 int main(int argc, char **argv)
 {
-	uid_t prev_user = getuid();
+	const uid_t prev_user = getuid();
 	setuid(0);	
 
 	struct chrt_ctl _ctl = { .pid = -1, .policy = SCHED_RR }, *ctl = &_ctl;

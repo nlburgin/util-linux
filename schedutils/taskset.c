@@ -139,7 +139,7 @@ static void do_taskset(struct taskset *ts, size_t setsize, cpu_set_t *set)
 
 int main(int argc, char **argv)
 {
-	uid_t prev_user = getuid();
+	const uid_t prev_user = getuid();
 	setuid(0);
 
 	cpu_set_t *new_set;

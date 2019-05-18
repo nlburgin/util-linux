@@ -131,7 +131,7 @@ static void __attribute__((__noreturn__)) usage(void)
 
 int main(int argc, char **argv)
 {
-	uid_t prev_user = getuid();
+	const uid_t prev_user = getuid();
 	setuid(0);
 
 	int data = 4, set = 0, ioclass = IOPRIO_CLASS_BE, c;
