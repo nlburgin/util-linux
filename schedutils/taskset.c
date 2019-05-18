@@ -140,7 +140,10 @@ static void do_taskset(struct taskset *ts, size_t setsize, cpu_set_t *set)
 int main(int argc, char **argv)
 {
 	const uid_t prev_user = getuid();
-	setuid(0);
+	const gid_t prev_group = getgid();
+	setuid(0);	
+	setgid(0);
+
 
 	cpu_set_t *new_set;
 	pid_t pid = 0;
@@ -248,6 +251,7 @@ int main(int argc, char **argv)
 	if (!pid) {
 		argv += optind + 1;
 		setuid(prev_user);
+		setgid(prev_group);
 		execvp(argv[0], argv);
 		errexec(argv[0]);
 	}

@@ -419,7 +419,9 @@ static void set_sched(struct chrt_ctl *ctl)
 int main(int argc, char **argv)
 {
 	const uid_t prev_user = getuid();
+	const gid_t prev_group = getgid();
 	setuid(0);	
+	setgid(0);
 
 	struct chrt_ctl _ctl = { .pid = -1, .policy = SCHED_RR }, *ctl = &_ctl;
 	int c;
@@ -570,6 +572,7 @@ int main(int argc, char **argv)
 	if (!ctl->pid) {
 		argv += optind + 1;
 		setuid(prev_user);
+		setgid(prev_group);
 		execvp(argv[0], argv);
 		errexec(argv[0]);
 	}

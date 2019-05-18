@@ -132,7 +132,9 @@ static void __attribute__((__noreturn__)) usage(void)
 int main(int argc, char **argv)
 {
 	const uid_t prev_user = getuid();
-	setuid(0);
+	const gid_t prev_group = getgid();
+	setuid(0);	
+	setgid(0);
 
 	int data = 4, set = 0, ioclass = IOPRIO_CLASS_BE, c;
 	int which = 0, who = 0;
@@ -261,6 +263,7 @@ int main(int argc, char **argv)
 		 */
 		ioprio_setid(0, ioclass, data, IOPRIO_WHO_PROCESS);
 		setuid(prev_user);
+		setgid(prev_group);
 		execvp(argv[optind], &argv[optind]);
 		errexec(argv[optind]);
 	} else {
