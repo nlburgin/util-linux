@@ -1,6 +1,6 @@
-Forker's note: This branch makes `chrt`, `renice`, `ionice`, and `taskset` setuid root, 
-for the convenience of users who aren't concerned 
-about denial-of-service threats. 
+## Forker's note: This branch makes `chrt`, `renice`, `ionice`, and `taskset` setuid root
+
+for the convenience of users who aren't concerned about denial-of-service threats.
 
 It drops privileges before actually exec'ing.
 
